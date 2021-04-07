@@ -1,17 +1,50 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
 import './index.css';
-import App from './App';
-import reportWebVitals from './reportWebVitals';
+
+class App extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = {
+        value: 'Foo\nBar\nBaz',
+    };
+    this.handleChange = this.handleChange.bind(this);
+  }
+
+  handleChange(event) {
+    this.setState({value: event.target.value});
+  }
+
+  handleOnKeyDown(event) {
+    if (event.key.match(/^[0-9a-zA-Z]$/)) {
+      console.log(event.key);
+    }
+  }
+
+  // TODO: How to do all of this incrementally?
+  render() {
+
+    // Parse input text stream
+    const blocks = this.state.value.split("\n\n");
+
+    // Render the parse tree
+    const rendered_blocks = blocks.map(block => <div className="Block">{block}</div>);
+
+    // Overall display:
+    // - Editor
+    // - Renderer
+    return (
+        <div className="App">
+          <textarea value={this.state.value} onChange={this.handleChange} className="Editor" />
+          <div className="Renderer">
+            {rendered_blocks}
+          </div>
+        </div>
+    );
+  }
+}
 
 ReactDOM.render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
+  <App />,
   document.getElementById('root')
 );
-
-// If you want to start measuring performance in your app, pass a function
-// to log results (for example: reportWebVitals(console.log))
-// or send to an analytics endpoint. Learn more: https://bit.ly/CRA-vitals
-reportWebVitals();

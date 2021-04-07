@@ -11,3 +11,26 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+textarea {
+  resize: none;
+}
+
+.App {
+  display: flex;
+}
+
+.Editor {
+  flex: 1;
+}
+
+.Renderer {
+  flex: 1;
+  white-space: pre-line;
+}
+
+.Block {
+  margin: 10px;
+  background-color: green;
+  color: white;
+}
