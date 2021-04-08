@@ -90,17 +90,39 @@ class App extends React.Component {
     }
     // Delete the character behind the position...
     else if (key === "Backspace") {
-      const new_value = block.value
-        .slice(0, block_cursor - 1)
-        .concat(block.value.slice(block_cursor));
-      const new_block = { ...block, value: new_value };
-      new_blocks = this.state.blocks
-        .slice(0, block_index)
-        .concat(new_block)
-        .concat(this.state.blocks.slice(block_index + 1))
-        .map((block, index) =>
-          index <= block_index ? block : { ...block, start: block.start - 1 }
-        );
+      // TODO: Probably need a better way to ensure it's not the first block,
+      //       since ordering on ID isn't necessarily true
+      if (block_cursor === 0) {
+        if (block_index > 0) {
+          // Concat the deleted blocks value onto the previous block
+          const prev_block = this.state.blocks[block_index - 1];
+          const new_prev_block = {
+            ...prev_block,
+            value: prev_block.value + block.value,
+          };
+          new_blocks = this.state.blocks
+            .slice(0, block_index - 1)
+            .concat(new_prev_block, this.state.blocks.slice(block_index + 1))
+            .map((block, index) =>
+              index <= block_index
+                ? block
+                : { ...block, start: block.start - 1 }
+            );
+        }
+      } else {
+        // Delete char
+        const new_value = block.value
+          .slice(0, block_cursor - 1)
+          .concat(block.value.slice(block_cursor));
+        const new_block = { ...block, value: new_value };
+        new_blocks = this.state.blocks
+          .slice(0, block_index)
+          .concat(new_block)
+          .concat(this.state.blocks.slice(block_index + 1))
+          .map((block, index) =>
+            index <= block_index ? block : { ...block, start: block.start - 1 }
+          );
+      }
     }
     // Create a new block
     else if (key === "Enter") {
