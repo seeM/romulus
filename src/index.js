@@ -1,4 +1,3 @@
-// TODO: Clean up "key" stuff...
 // TODO: There must be a better way to handle the updating of `start`, automatically...
 //       As a separate system? Tree-sitter, basically?
 import React from "react";
@@ -81,12 +80,8 @@ class App extends React.Component {
 
     // Find our position in that block?
     const block_cursor = cursor - block.start;
-    // console.log(
-    //   "You're in block " + block_index + " at position " + block_cursor
-    // );
 
     // Insert the character in that block at that position...
-    // TODO: Clean up this logic
     const key = event.key;
     let new_blocks = null;
     // TODO: Space? Punctuation? How to define all of these...
@@ -194,34 +189,16 @@ class App extends React.Component {
         .concat(new_page, this.state.pages.slice(this.state.active_page + 1));
       this.setState({ pages: new_pages });
     }
-
-    // TODO: Is this not allowing me to key repeat? Any way to do this on key down? Does it matter?
-    // If there's no selection
-    // if (
-    //   event.target.selectionStart === event.target.selectionEnd &&
-    //   // Cursor moved
-    //   event.target.selectionStart !== this.state.selectionStart
-    // ) {
-    //   // console.log("Cursor moved - no selection");
-    // }
-
-    // this.setState({ selectionStart: event.target.selectionStart });
-    // this.setState({ selectionEnd: event.target.selectionEnd });
   }
 
   render() {
-    // TODO: Need a better way to ID blocks... But does that need tree-sitter?
-    //       Else how do we know which block we're editing?... Need to reflect
-    //       on this.
-    // Parse input text stream
-
     // Transform parse tree
     // Evaluate/resolve block references
-    // TODO: Clean this shit up
     const page = this.state.pages[this.state.active_page];
     const text = page.text;
     const blocks = page.blocks;
 
+    // TODO: Recursive block references...
     let blocks_to_search = [];
     this.state.pages.map((page) =>
       page.blocks.map((block) => blocks_to_search.push(block))
@@ -232,8 +209,6 @@ class App extends React.Component {
       const match = block.value.match(/\(\((.*)\)\)/);
       if (match) {
         const id = match[1];
-        // console.log("Block " + block.id + " has ref to block " + id);
-        // console.log(match);
         const split = block.value.split(match[0]);
         const split2 = [
           split[0],
