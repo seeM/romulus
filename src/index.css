@@ -34,3 +34,9 @@ textarea {
   background-color: green;
   color: white;
 }
+
+.BlockRef {
+  margin: 10px;
+  background-color: blue;
+  color: white;
+}
