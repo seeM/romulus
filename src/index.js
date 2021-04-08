@@ -1,15 +1,19 @@
 // TODO: Clean up "key" stuff...
+// TODO: There must be a better way to handle the updating of `start`, automatically...
+//       As a separate system? Tree-sitter, basically?
 import React from "react";
 import ReactDOM from "react-dom";
 import "./index.css";
 
-const BLOCK_DELIM = "\n\n";
+const BLOCK_DELIM = "\n";
+// TODO: Better way?
+let LAST_BLOCK_ID = 0;
 
 class App extends React.Component {
   constructor(props) {
     super(props);
     this.state = {
-      text: "Foo\nBar: ((2))\nBaz\n\nToo\n\nAnother\n\nfinal",
+      text: "foo: ((2))\nbar\nbaz",
       // selectionStart: 0,
       // selectionEnd: 0,
     };
@@ -27,7 +31,8 @@ class App extends React.Component {
             BLOCK_DELIM.length;
       this.state.blocks.push({ id: i, value: splitted[i], start: start });
     }
-    console.log(this.state.blocks);
+    LAST_BLOCK_ID = this.state.blocks.length - 1;
+    // console.log(this.state.blocks);
     // this.state.blocks = this.state.text.split(BLOCK_DELIM).map((value, id) => {
     //   if (id === 0) {
     //     start = 0
@@ -64,30 +69,81 @@ class App extends React.Component {
     // );
 
     // Insert the character in that block at that position...
-    // TODO: Cleaner?
+    // TODO: Clean up this logic
     const key = event.key;
     let new_blocks = null;
+    // TODO: Space? Punctuation? How to define all of these...
     if (key.match(/^[0-9a-zA-Z()]$/)) {
-      const new_value = block.value.slice(0, block_cursor).concat(event.key, block.value.slice(block_cursor));
+      const new_value = block.value
+        .slice(0, block_cursor)
+        .concat(event.key, block.value.slice(block_cursor));
       const new_block = { ...block, value: new_value };
       new_blocks = this.state.blocks
         .slice(0, block_index)
         .concat(new_block)
         .concat(this.state.blocks.slice(block_index + 1))
-        .map((block, index) => (
-          index <= block_index ? block : {...block, start: block.start + event.key.length}
-        ));
+        .map((block, index) =>
+          index <= block_index
+            ? block
+            : { ...block, start: block.start + event.key.length }
+        );
     }
-    else if (key === 'Backspace') {
-      const new_value = block.value.slice(0, block_cursor - 1).concat(block.value.slice(block_cursor));
+    // Delete the character behind the position...
+    else if (key === "Backspace") {
+      const new_value = block.value
+        .slice(0, block_cursor - 1)
+        .concat(block.value.slice(block_cursor));
       const new_block = { ...block, value: new_value };
       new_blocks = this.state.blocks
         .slice(0, block_index)
         .concat(new_block)
         .concat(this.state.blocks.slice(block_index + 1))
-        .map((block, index) => (
-          index <= block_index ? block : {...block, start: block.start - 1}
-        ));
+        .map((block, index) =>
+          index <= block_index ? block : { ...block, start: block.start - 1 }
+        );
+    }
+    // Create a new block
+    else if (key === "Enter") {
+      // Create the new block
+      const splitted = [
+        block.value.slice(0, block_cursor),
+        block.value.slice(block_cursor),
+      ];
+      // TODO: Make a func? Make immutable?
+      let new_block_id = LAST_BLOCK_ID + 1;
+      LAST_BLOCK_ID = new_block_id;
+
+      let first_id = null;
+      let second_id = null;
+      // Cursor is at the end of the block
+      if (block_cursor === block.value.length - 1) {
+        first_id = new_block_id;
+        second_id = block.id;
+      } else {
+        first_id = block.id;
+        second_id = new_block_id;
+      }
+      const newer_blocks = [
+        { id: first_id, value: splitted[0], start: block.start },
+        {
+          id: second_id,
+          value: splitted[1],
+          start: block.start + splitted[0].length,
+        },
+      ];
+
+      // Update block tree
+      new_blocks = this.state.blocks
+        .slice(0, block_index)
+        .concat(newer_blocks)
+        .concat(this.state.blocks.slice(block_index + 1))
+        // Update block tree index
+        .map((block, index) =>
+          index <= block_index ? block : { ...block, start: block.start + 1 }
+        );
+      console.log(new_blocks);
+    } else {
+      console.log("Ignoring unknown key: " + key);
     }
 
     // Update the block starts / index...
