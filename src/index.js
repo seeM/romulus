@@ -21,8 +21,8 @@ function deserialize(text) {
     blocks.push({
       type: "block",
       id: LAST_BLOCK_ID + i,
-      text: blockTexts[i],
       start: start,
+      text: blockTexts[i],
     });
     LAST_BLOCK_ID += 1;
   }
@@ -34,12 +34,12 @@ function deserialize(text) {
     let children = null;
     const match = block.text.match(BLOCK_REF_PATTERN);
     if (match) {
-      const ref_start = match[1];
-      const plain_text = block.text.split(match[0]);
+      const refStart = match[1];
+      const plainText = block.text.split(match[0]);
       children = [
-        { type: "text", value: plain_text[0] },
-        { type: "ref", start: ref_start },
-        { type: "text", value: plain_text[1] },
+        { type: "text", value: plainText[0] },
+        { type: "ref", value: refStart },
+        { type: "text", value: plainText[1] },
       ];
     } else {
       children = [{ type: "text", value: block.text }];
@@ -57,17 +57,23 @@ class App extends React.Component {
   }
 
   render() {
-    const structure = this.state.blocks.map((block) => {
+    // TODO: This is a super naive struct renderer
+    const structElements = this.state.blocks.map((block) => {
+      let children = block.children.map((child) => (
+        <div className={"node-" + child.type}>
+          {"[" + child.type + "]"} {child.value}
+        </div>
+      ));
       return (
-        <div className="Block" key={block.id}>
-          ({block.id}) {block.text}
+        <div className={"node-" + block.type}>
+          {"[" + block.type + "]"} {children}
         </div>
       );
     });
 
     return (
       <div className="App">
-        <div className="Structure">{structure}</div>
+        <div className="Structure">{structElements}</div>
       </div>
     );
   }
