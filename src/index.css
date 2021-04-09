@@ -20,13 +20,14 @@ textarea {
   display: flex;
 }
 
-.Editor {
+.Text {
   flex: 1;
 }
 
 .Structure {
   flex: 1;
   white-space: pre-line;
+  background-color: lightgrey;
 }
 
 .node-block {
