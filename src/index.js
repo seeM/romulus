@@ -50,6 +50,22 @@ function deserialize(text) {
   return blocks;
 }
 
+function renderStructElements(blocks) {
+  // TODO: This is a super naive struct renderer
+  return blocks.map((block) => {
+    let children = block.children.map((child) => (
+      <div className={"node-" + child.type}>
+        {"[" + child.type + "]"} {child.value}
+      </div>
+    ));
+    return (
+      <div className={"node-" + block.type}>
+        {"[" + block.type + "]"} {children}
+      </div>
+    );
+  });
+}
+
 class App extends React.Component {
   constructor(props) {
     super(props);
@@ -57,23 +73,9 @@ class App extends React.Component {
   }
 
   render() {
-    // TODO: This is a super naive struct renderer
-    const structElements = this.state.blocks.map((block) => {
-      let children = block.children.map((child) => (
-        <div className={"node-" + child.type}>
-          {"[" + child.type + "]"} {child.value}
-        </div>
-      ));
-      return (
-        <div className={"node-" + block.type}>
-          {"[" + block.type + "]"} {children}
-        </div>
-      );
-    });
-
     return (
       <div className="App">
-        <div className="Structure">{structElements}</div>
+        <div className="Structure">{renderStructElements(this.state.blocks)}</div>
       </div>
     );
   }
