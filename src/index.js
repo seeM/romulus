@@ -287,15 +287,17 @@ class App extends React.Component {
     // Render text with span at cursor position.
     const textWithCursor = [
       text.slice(0, textCursor),
-      <span>|</span>,
-      text.slice(textCursor),
+      <div className="TextAfter">
+        <span className="Cursor"></span>
+        {text.slice(textCursor)}
+      </div>,
     ];
 
     return (
       <div className="App">
         <div className="Text">{textWithCursor}</div>
         <div className="Structure" onKeyDown={this.handleKeyDown} tabIndex="0">
-          <div className="Cursor">
+          <div>
             {"Text: " + textCursor}
             {"\nStruct: " +
               this.state.structCursor.node +

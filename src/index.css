@@ -26,6 +26,25 @@ textarea {
   white-space: pre-line;
 }
 
+.Cursor {
+  position: absolute;
+  width: 1ch;
+  height: 1.2em;
+  top: 0.1em;
+  z-index: -1;
+  animation: 1s foo step-end infinite;
+}
+
+@keyframes foo {
+  from, to { background-color: transparent; }
+  50% { background-color: lime; }
+}
+
+.TextAfter {
+  display: inline;
+  position: relative;
+}
+
 .Structure {
   flex: 1;
   white-space: pre-line;
