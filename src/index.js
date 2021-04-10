@@ -1,9 +1,11 @@
+// TODO: Refactor cursor to point to actual node not id?
 import React from "react";
 import ReactDOM from "react-dom";
 import "./index.css";
 
 // Some text to play with
-const TEXT = "foo: ((12))\nbar\nbaz";
+// TODO: We can't really deal with empty text nodes yet
+const TEXT = "foo: ((17)) text\nbar\nbaz";
 
 const BLOCK_DELIM = "\n";
 const BLOCK_REF_PATTERN = /\(\((.*)\)\)/;
@@ -40,7 +42,7 @@ function deserialize(text) {
 
   // TODO: Functional?
   const startToBlock = {};
-  blocks.map(block => {
+  blocks.map((block) => {
     startToBlock[block.start] = block;
     return null;
   });
@@ -98,6 +100,12 @@ function deserialize(text) {
     block.children = children;
   }
 
+  // For convenience, each node knows its previous and next node.
+  for (let i = 0; i < nodes.length; i++) {
+    nodes[i].prev = i === 0 ? null : nodes[i - 1];
+    nodes[i].next = i + 1 === nodes.length ? null : nodes[i + 1];
+  }
+
   return [blocks, nodes];
 }
 
@@ -125,7 +133,6 @@ class App extends React.Component {
     this.state = {
       blocks: blocks,
       nodes: nodes,
-      textCursor: 0,
       structCursor: { node: 0, char: 0 },
     };
     console.log(nodes);
@@ -173,23 +180,59 @@ class App extends React.Component {
         if (structCursor.node <= 0) {
           // At the beginning of the first node, do nothing.
         } else {
-          // At the beginning of a node, go to the end of the previous node.
-          structCursor.node--;
-          structCursor.char = nodes[structCursor.node].text.length;
+          // At the beginning of a node
+          const node = nodes[structCursor.node].prev;
+          if (node.parent !== nodes[structCursor.node].parent) {
+            // Moved to a new block.
+            structCursor.node--;
+            // TODO: We're doing the same shitty assumption about rendering here...
+            structCursor.char = node.rendered.length;
+          } else if (node.type === "text") {
+            // Go to the last char of the previous node.
+            structCursor.node--;
+            // TODO: We're doing the same shitty assumption about rendering here...
+            structCursor.char = node.rendered.length - 1;
+          } else if (node.type === "ref") {
+            // Go to the start of the previous node.
+            structCursor.node--;
+            structCursor.char = 0;
+          } else {
+            throw new Error("Unknown node type: " + node.type);
+          }
         }
       } else {
-        // Not at the beginning of a node, go back one char.
+        // Not at the beginning of a node
+        // Go back one char.
         structCursor.char--;
       }
     } else if (key === "ArrowRight") {
-      if (structCursor.char >= nodes[structCursor.node].text.length - 1) {
+      if (structCursor.char >= nodes[structCursor.node].text.length) {
         // At the end of a node.
         if (structCursor.node >= nodes.length - 1) {
           // At the end of the last node, do nothing.
         } else {
-          // At the end of a node, go to the beginning of the next node.
-          structCursor.node++;
-          structCursor.char = 0;
+          // At the end of a node.
+          const node = nodes[structCursor.node].next;
+          if (node.parent !== nodes[structCursor.node].parent) {
+            // Moved to a new block.
+            structCursor.node++;
+            structCursor.char = 0;
+          } else if (node.type === "text") {
+            // Move one char into the next node.
+            structCursor.node++;
+            structCursor.char = 1;
+          } else if (node.type === "ref") {
+            // Go forward passed the ref's rendered text.
+            // TODO: This ain't good because we're contaminating cursor movement with rendering logic.
+            // I.e. the assumption about how refs are rendered... Need a better way!
+            // structCursor.char += BLOCK_REF_DELIM_LENGTH + node.value.text.length;
+            structCursor.node += 2;
+            structCursor.char = 0;
+            // TODO: Can't we just move to the next node? And deal with where these nodes are within a block
+            // only at text render time??? Booyakasha
+          } else {
+            throw new Error("Unknown node type: " + node.type);
+          }
         }
       } else {
         // Not at the end of a node, go forward one char.
@@ -204,10 +247,11 @@ class App extends React.Component {
   render() {
     // Serialize blocks to text
     const blocks = this.state.blocks;
-    const lines = blocks.map(block => {
-      const nodeTexts = block.children.map(node => {
+    const lines = blocks.map((block) => {
+      const nodeTexts = block.children.map((node) => {
         if (node.type === "text") {
-          return node.text;
+          node.rendered = node.text;
+          return node.rendered;
         } else if (node.type === "ref") {
           // TODO: If we want text as both interface and persistance layer,
           // how do we ALSO do WYSIWYG in that interface? E.g. replacing ((1))
@@ -217,7 +261,8 @@ class App extends React.Component {
           const refBlock = node.value;
           // TODO: Adding brackets because we're rendering raw unstylised text,
           // but we still need some indication that it's a ref. See todo above.
-          return "((" + refBlock.text + "))";
+          node.rendered = "((" + refBlock.text + "))";
+          return node.rendered;
         } else {
           throw new Error("Unknown node type: " + node.type);
         }
@@ -226,14 +271,32 @@ class App extends React.Component {
     });
     const text = lines.join(BLOCK_DELIM);
 
+    // Translate structCursor to textCursor
+    const structCursor = this.state.structCursor;
+    const node = this.state.nodes[structCursor.node];
+    const nodes = this.state.nodes;
+    const nodeIndex = nodes.findIndex((n) => n === node);
+    const nodeCharOffset = nodes
+      .slice(0, nodeIndex)
+      .map((n) => n.rendered.length)
+      .reduce((a, b) => a + b, 0);
+    const block = node.parent;
+    const blockIndex = blocks.findIndex((b) => b === block); // TODO: Shitty way to account for newlines
+    const textCursor = nodeCharOffset + blockIndex + structCursor.char;
+
+    // Render text with span at cursor position.
+    const textWithCursor = [
+      text.slice(0, textCursor),
+      <span>|</span>,
+      text.slice(textCursor),
+    ];
+
     return (
       <div className="App">
-        <div className="Text">
-          {text}
-        </div>
+        <div className="Text">{textWithCursor}</div>
         <div className="Structure" onKeyDown={this.handleKeyDown} tabIndex="0">
           <div className="Cursor">
-            {"Text: " + this.state.textCursor}
+            {"Text: " + textCursor}
             {"\nStruct: " +
               this.state.structCursor.node +
               ", " +
