@@ -3,7 +3,7 @@ import ReactDOM from "react-dom";
 import "./index.css";
 
 // Some text to play with
-const TEXT = "foo: ((2))\nbar\nbaz";
+const TEXT = "foo: ((12))\nbar\nbaz";
 
 const BLOCK_DELIM = "\n";
 const BLOCK_REF_PATTERN = /\(\((.*)\)\)/;
@@ -38,6 +38,13 @@ function deserialize(text) {
     blocks[i].next = i + 1 === blocks.length ? null : blocks[i + 1];
   }
 
+  // TODO: Functional?
+  const startToBlock = {};
+  blocks.map(block => {
+    startToBlock[block.start] = block;
+    return null;
+  });
+
   // Parse inlines
   let nodes = [];
   for (let i = 0; i < blocks.length; i++) {
@@ -48,6 +55,12 @@ function deserialize(text) {
     const match = block.text.match(BLOCK_REF_PATTERN);
     if (match) {
       const refStart = match[1];
+      const refBlock = startToBlock[refStart];
+      if (refBlock == null) {
+        console.log(blocks);
+        throw new Error("Block has invalid ref: '" + block.text + "'");
+      }
+      // TODO: Go from refStart to block? Should we keep a map of refStart -> block?
       const plainText = block.text.split(match[0]);
       // Node starts are relative to their containing block.
       const first = {
@@ -60,7 +73,7 @@ function deserialize(text) {
       const second = {
         type: "ref",
         text: match[0],
-        value: refStart,
+        value: refBlock,
         start: first.start + first.text.length,
         parent: block,
       };
@@ -189,8 +202,35 @@ class App extends React.Component {
   }
 
   render() {
+    // Serialize blocks to text
+    const blocks = this.state.blocks;
+    const lines = blocks.map(block => {
+      const nodeTexts = block.children.map(node => {
+        if (node.type === "text") {
+          return node.text;
+        } else if (node.type === "ref") {
+          // TODO: If we want text as both interface and persistance layer,
+          // how do we ALSO do WYSIWYG in that interface? E.g. replacing ((1))
+          // with stylised text of block 1 isn't respecting the persistance
+          // layer.
+          // In other words, do we render raw text or stylised divs?
+          const refBlock = node.value;
+          // TODO: Adding brackets because we're rendering raw unstylised text,
+          // but we still need some indication that it's a ref. See todo above.
+          return "((" + refBlock.text + "))";
+        } else {
+          throw new Error("Unknown node type: " + node.type);
+        }
+      });
+      return nodeTexts.join("");
+    });
+    const text = lines.join(BLOCK_DELIM);
+
     return (
       <div className="App">
+        <div className="Text">
+          {text}
+        </div>
         <div className="Structure" onKeyDown={this.handleKeyDown} tabIndex="0">
           <div className="Cursor">
             {"Text: " + this.state.textCursor}
