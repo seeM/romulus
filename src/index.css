@@ -32,7 +32,9 @@ textarea {
   height: 1.2em;
   top: 0.1em;
   z-index: -1;
-  animation: 1s foo step-end infinite;
+  /* TODO: Need to reset animation on motion, else it's bad UX */
+  background-color: lime;
+  /* animation: 1s foo step-end infinite; */
 }
 
 @keyframes foo {
