@@ -240,7 +240,13 @@ class App extends React.Component {
         // Not at the end of a node, go forward one char.
         structCursor.char++;
       }
-    } else {
+    } else if (key.length === 1) {
+        // Text char
+        const node = nodes[structCursor.node];
+        if (node.type === "text") {
+            node.text = node.text.slice(0, structCursor.char) + key + node.text.slice(structCursor.char);
+            structCursor.char++;
+        }
     }
 
     this.setState({ structCursor: structCursor });
