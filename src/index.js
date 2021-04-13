@@ -193,9 +193,11 @@ class App extends React.Component {
             // TODO: We're doing the same shitty assumption about rendering here...
             structCursor.char = node.rendered.length - 1;
           } else if (node.type === "ref") {
-            // Go to the start of the previous node.
-            structCursor.node--;
-            structCursor.char = 0;
+            // Go passed the last char of the 2x previous node.
+            structCursor.node -= 2;
+            // TODO: We're doing the same shitty assumption about rendering here...
+            // TODO: What if there's no previous node?
+            structCursor.char = node.prev.rendered.length;
           } else {
             throw new Error("Unknown node type: " + node.type);
           }
