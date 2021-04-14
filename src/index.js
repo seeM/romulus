@@ -240,13 +240,85 @@ class App extends React.Component {
         // Not at the end of a node, go forward one char.
         structCursor.char++;
       }
-    } else if (key.length === 1) {
-        // Text char
-        const node = nodes[structCursor.node];
-        if (node.type === "text") {
-            node.text = node.text.slice(0, structCursor.char) + key + node.text.slice(structCursor.char);
-            structCursor.char++;
+    } else if (key === "Backspace") {
+      const node = nodes[structCursor.node];
+      // TODO: Block management could exist outside of the interface layer completely...
+      if (node.type === "text") {
+        if (structCursor.char <= 0) {
+          // At the beginning of a node
+          if (node.prev && node.prev.parent !== node.parent) {
+            // Backspaced from beginning of a block
+
+            // Delete the block and update all the pointers
+            const block = node.parent;
+            const blocks = this.state.blocks;
+            // TODO: Updating the pointers is really a shit show maintaining all of this stuff...
+            //       Probably need a tree abstraction somewhere...
+            console.log(block);
+            let newBlock = {
+              ...block.prev,
+              children: block.prev.children.concat(block.children),
+              next: block.next,
+            };
+            // TODO: How to make this immutable?
+            newBlock.children = newBlock.children.map(n => ({...n, parent: newBlock}));
+
+            // Update nodes list
+            // NOTE: Have to update *all* of this block's nodes because they were recreated above
+            const newNodes1 = newBlock.children;
+            const nodeIndex = nodes.findIndex(n => (n === node));
+            const newNodes = nodes.slice(0, nodeIndex).concat(newNodes1, nodes.slice(nodeIndex + newNodes1.length));
+            // console.log(nodes);
+            // console.log(nodeIndex);
+            // console.log(newNodes1);
+            // console.log(newNodes);
+            // Update cursor
+            // structCursor.node = newNode;
+            // console.log(newNode);
+
+            // TODO: Really need a better way to do this.
+            const blockIndex = blocks.findIndex(b => b === block);
+            const newBlocks = (
+              blocks.slice(0, blockIndex - 1)
+              .concat(
+                newBlock,
+                {
+                  ...block.next,
+                  prev: block,
+                },
+                blocks.slice(blockIndex + 2),
+              )
+            );
+            // TODO: We just deleted a block... How do we update all refs of it?
+            // TODO: Don't mutate like this. At least move to end of function
+
+            this.setState({ blocks: newBlocks, nodes: newNodes });
+
+            console.log(newBlocks);
+          } else {
+            // Backspaced at the beginning of a node, but not beginning of a block
+            if (node.prev.type === "text") {
+              // TODO: Join text nodes?
+            }
+          }
+        } else {
+          // Not at the beginning of a node
+          node.text = node.text.slice(0, structCursor.char - 1) + node.text.slice(structCursor.char);
+          structCursor.char--;
         }
+      }
+    } else if (key.length === 1) {
+      // Text char
+      const node = nodes[structCursor.node];
+      if (node.type === "text") {
+        node.text =
+          node.text.slice(0, structCursor.char) +
+          key +
+          node.text.slice(structCursor.char);
+        structCursor.char++;
+      }
+    } else {
+      console.log(key);
     }
 
     this.setState({ structCursor: structCursor });
