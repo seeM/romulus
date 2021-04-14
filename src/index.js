@@ -2,6 +2,7 @@
 import React from "react";
 import ReactDOM from "react-dom";
 import "./index.css";
+var _ = require("lodash");
 
 // Some text to play with
 // TODO: We can't really deal with empty text nodes yet
@@ -71,6 +72,7 @@ function deserialize(text) {
         value: plainText[0],
         start: 0,
         parent: block,
+        children: [],
       };
       const second = {
         type: "ref",
@@ -78,6 +80,7 @@ function deserialize(text) {
         value: refBlock,
         start: first.start + first.text.length,
         parent: block,
+        children: [],
       };
       const third = {
         type: "text",
@@ -85,6 +88,7 @@ function deserialize(text) {
         value: plainText[1],
         start: second.start + second.text.length,
         parent: block,
+        children: [],
       };
       children = [first, second, third];
     } else {
@@ -94,6 +98,7 @@ function deserialize(text) {
         value: block.text,
         start: 0,
         parent: block,
+        children: [],
       });
     }
     nodes = nodes.concat(children);
@@ -106,7 +111,7 @@ function deserialize(text) {
     nodes[i].next = i + 1 === nodes.length ? null : nodes[i + 1];
   }
 
-  return [blocks, nodes];
+  return blocks;
 }
 
 function renderStructElements(blocks) {
@@ -126,24 +131,95 @@ function renderStructElements(blocks) {
   });
 }
 
+// function previousNode(nodes, node) {
+//   return node.prev;
+// }
+
+function firstDescendant(node) {
+  return node.children.length === 0
+    ? node
+    : firstDescendant(_.first(node.children));
+}
+
+function lastDescendant(node) {
+  return node.children.length === 0
+    ? node
+    : lastDescendant(_.last(node.children));
+}
+
+function moveLeaf(node, direction) {
+  const getDescendant = direction === "prev" ? lastDescendant : firstDescendant;
+
+  // try prev/next
+  if (node[direction]) {
+    return getDescendant(node[direction]);
+  } else {
+    // try up
+    if (node.parent) {
+      // try prev/next
+      if (node.parent[direction]) {
+        return getDescendant(node.parent[direction]);
+      } else {
+        // `node`'s parent is first/last sibling
+        return null;
+      }
+    } else {
+      // `node` is first/last sibling and root
+      return null;
+    }
+  }
+}
+
+function previousLeaf(node) {
+  if (node.children.length > 0) {
+    throw new Error("Called previousLeaf on a non-leaf node");
+  }
+  return moveLeaf(node, "prev");
+}
+
+function nextLeaf(node) {
+  if (node.children.length > 0) {
+    throw new Error("Called nextLeaf on a non-leaf node");
+  }
+  return moveLeaf(node, "next");
+}
+
+function previousLeaves(node) {
+  // TODO: Clean up
+  let ret = [];
+  let cur = node;
+  while (cur) {
+    cur = previousLeaf(cur);
+    if (cur) {
+      ret.push(cur);
+    }
+  }
+  return ret;
+}
+
+// function backward(struct, cursor) {
+//   return [struct, cursor]
+// }
+
+// function get(struct, cursor) {
+// }
+
 class App extends React.Component {
   constructor(props) {
     super(props);
-    const [blocks, nodes] = deserialize(TEXT);
+    const blocks = deserialize(TEXT);
     this.state = {
       blocks: blocks,
-      nodes: nodes,
-      structCursor: { node: 0, char: 0 },
+      // TODO: Make this take a path?
+      cursor: { node: blocks[0].children[0], char: 0 },
     };
-    console.log(nodes);
     this.handleKeyDown = this.handleKeyDown.bind(this);
   }
 
   handleKeyDown(event) {
-    let structCursor = this.state.structCursor;
-    const nodes = this.state.nodes;
+    let cursor = this.state.cursor;
 
-    // The structCursor moves along nodes, and we easily translate from
+    // The cursor moves along nodes, and we easily translate from
     // that to the block and text co-ordinate systems as needed. Nodes know
     // their position in a block, and blocks know their position in the text.
 
@@ -153,175 +229,171 @@ class App extends React.Component {
 
     const key = event.key;
     if (key === "ArrowUp") {
-      const prev = nodes[structCursor.node].parent.prev;
+      const prev = cursor.node.parent.prev;
       if (prev) {
         // Not at the first block, move to the previous block.
-        // TODO: If the block has no children we're screwed - is that possible?
-        // TODO: Should nodes know their position?
-        structCursor.node = nodes.findIndex((x) => x === prev.children[0]);
-        structCursor.char = 0;
+        cursor.block = prev;
+        cursor.node = prev.children[0];
+        cursor.char = 0;
       } else {
         // At the first block, do nothing.
       }
     } else if (key === "ArrowDown") {
-      const next = nodes[structCursor.node].parent.next;
+      const next = cursor.node.parent.next;
       if (next) {
         // Not at the last block, move to the next block.
-        // TODO: If the block has no children we're screwed - is that possible?
-        // TODO: Should nodes know their position?
-        structCursor.node = nodes.findIndex((x) => x === next.children[0]);
-        structCursor.char = 0;
+        cursor.block = next;
+        cursor.node = next.children[0];
+        cursor.char = 0;
       } else {
         // At the last block, do nothing.
       }
-    } else if (key === "ArrowLeft") {
-      if (structCursor.char <= 0) {
-        // At the beginning of a node.
-        if (structCursor.node <= 0) {
-          // At the beginning of the first node, do nothing.
-        } else {
-          // At the beginning of a node
-          const node = nodes[structCursor.node].prev;
-          if (node.parent !== nodes[structCursor.node].parent) {
-            // Moved to a new block.
-            structCursor.node--;
-            // TODO: We're doing the same shitty assumption about rendering here...
-            structCursor.char = node.rendered.length;
-          } else if (node.type === "text") {
-            // Go to the last char of the previous node.
-            structCursor.node--;
-            // TODO: We're doing the same shitty assumption about rendering here...
-            structCursor.char = node.rendered.length - 1;
-          } else if (node.type === "ref") {
-            // Go passed the last char of the 2x previous node.
-            structCursor.node -= 2;
-            // TODO: We're doing the same shitty assumption about rendering here...
-            // TODO: What if there's no previous node?
-            structCursor.char = node.prev.rendered.length;
-          } else {
-            throw new Error("Unknown node type: " + node.type);
-          }
-        }
-      } else {
-        // Not at the beginning of a node
-        // Go back one char.
-        structCursor.char--;
-      }
-    } else if (key === "ArrowRight") {
-      if (structCursor.char >= nodes[structCursor.node].text.length) {
-        // At the end of a node.
-        if (structCursor.node >= nodes.length - 1) {
-          // At the end of the last node, do nothing.
-        } else {
-          // At the end of a node.
-          const node = nodes[structCursor.node].next;
-          if (node.parent !== nodes[structCursor.node].parent) {
-            // Moved to a new block.
-            structCursor.node++;
-            structCursor.char = 0;
-          } else if (node.type === "text") {
-            // Move one char into the next node.
-            structCursor.node++;
-            structCursor.char = 1;
-          } else if (node.type === "ref") {
-            // Go forward passed the ref's rendered text.
-            // TODO: This ain't good because we're contaminating cursor movement with rendering logic.
-            // I.e. the assumption about how refs are rendered... Need a better way!
-            // structCursor.char += BLOCK_REF_DELIM_LENGTH + node.value.text.length;
-            structCursor.node += 2;
-            structCursor.char = 0;
-            // TODO: Can't we just move to the next node? And deal with where these nodes are within a block
-            // only at text render time??? Booyakasha
-          } else {
-            throw new Error("Unknown node type: " + node.type);
-          }
-        }
-      } else {
-        // Not at the end of a node, go forward one char.
-        structCursor.char++;
-      }
-    } else if (key === "Backspace") {
-      const node = nodes[structCursor.node];
-      // TODO: Block management could exist outside of the interface layer completely...
-      if (node.type === "text") {
-        if (structCursor.char <= 0) {
-          // At the beginning of a node
-          if (node.prev && node.prev.parent !== node.parent) {
-            // Backspaced from beginning of a block
+      // } else if (key === "ArrowLeft") {
+      //   if (cursor.char <= 0) {
+      //     // At the beginning of a node.
+      //     if (cursor.node <= 0) {
+      //       // At the beginning of the first node, do nothing.
+      //     } else {
+      //       // At the beginning of a node.
+      //       const node = nodes[cursor.node];
+      //       const prev = node.prev;
+      //       if (prev.parent !== node.parent) {
+      //         // Moved to a new block.
+      //         cursor.node--;
+      //         cursor.char = prev.rendered.length - 1;
+      //       } else if (prev.type === "text") {
+      //         // Go to the last char of the previous node.
+      //         cursor.node--;
+      //         cursor.char = prev.rendered.length - 1;
+      //       } else if (prev.type === "ref") {
+      //         // Go passed the last char of the 2x previous node.
+      //         cursor.node -= 2;
+      //         // TODO: What if there's no previous node?
+      //         cursor.char = prev.prev.rendered.length;
+      //       } else {
+      //         throw new Error("Unknown node type: " + prev.type);
+      //       }
+      //     }
+      //   } else {
+      //     // Not at the beginning of a node
+      //     // Go back one char.
+      //     cursor.char--;
+      //   }
+      // } else if (key === "ArrowRight") {
+      //   if (cursor.char >= nodes[cursor.node].text.length) {
+      //     // At the end of a node.
+      //     if (cursor.node >= nodes.length - 1) {
+      //       // At the end of the last node, do nothing.
+      //     } else {
+      //       // At the end of a node.
+      //       const node = nodes[cursor.node].next;
+      //       if (node.parent !== nodes[cursor.node].parent) {
+      //         // Moved to a new block.
+      //         cursor.node++;
+      //         cursor.char = 0;
+      //       } else if (node.type === "text") {
+      //         // Move one char into the next node.
+      //         cursor.node++;
+      //         cursor.char = 1;
+      //       } else if (node.type === "ref") {
+      //         // Go forward passed the ref's rendered text.
+      //         // TODO: This ain't good because we're contaminating cursor movement with rendering logic.
+      //         // I.e. the assumption about how refs are rendered... Need a better way!
+      //         // cursor.char += BLOCK_REF_DELIM_LENGTH + node.value.text.length;
+      //         cursor.node += 2;
+      //         cursor.char = 0;
+      //         // TODO: Can't we just move to the next node? And deal with where these nodes are within a block
+      //         // only at text render time??? Booyakasha
+      //       } else {
+      //         throw new Error("Unknown node type: " + node.type);
+      //       }
+      //     }
+      //   } else {
+      //     // Not at the end of a node, go forward one char.
+      //     cursor.char++;
+      //   }
+      // } else if (key === "Backspace") {
+      //   const node = nodes[cursor.node];
+      //   // TODO: Block management could exist outside of the interface layer completely...
+      //   if (node.type === "text") {
+      //     if (cursor.char <= 0) {
+      //       // At the beginning of a node
+      //       if (node.prev && node.prev.parent !== node.parent) {
+      //         // Backspaced from beginning of a block
 
-            // Delete the block and update all the pointers
-            const block = node.parent;
-            const blocks = this.state.blocks;
-            // TODO: Updating the pointers is really a shit show maintaining all of this stuff...
-            //       Probably need a tree abstraction somewhere...
-            console.log(block);
-            let newBlock = {
-              ...block.prev,
-              children: block.prev.children.concat(block.children),
-              next: block.next,
-            };
-            // TODO: How to make this immutable?
-            newBlock.children = newBlock.children.map(n => ({...n, parent: newBlock}));
+      //         // Delete the block and update all the pointers
+      //         const block = node.parent;
+      //         const blocks = this.state.blocks;
+      //         // TODO: Updating the pointers is really a shit show maintaining all of this stuff...
+      //         //       Probably need a tree abstraction somewhere...
+      //         console.log(block);
+      //         let newBlock = {
+      //           ...block.prev,
+      //           children: block.prev.children.concat(block.children),
+      //           next: block.next,
+      //         };
+      //         // TODO: How to make this immutable?
+      //         newBlock.children = newBlock.children.map(n => ({...n, parent: newBlock}));
 
-            // Update nodes list
-            // NOTE: Have to update *all* of this block's nodes because they were recreated above
-            const newNodes1 = newBlock.children;
-            const nodeIndex = nodes.findIndex(n => (n === node));
-            const newNodes = nodes.slice(0, nodeIndex).concat(newNodes1, nodes.slice(nodeIndex + newNodes1.length));
-            // console.log(nodes);
-            // console.log(nodeIndex);
-            // console.log(newNodes1);
-            // console.log(newNodes);
-            // Update cursor
-            // structCursor.node = newNode;
-            // console.log(newNode);
+      //         // Update nodes list
+      //         // NOTE: Have to update *all* of this block's nodes because they were recreated above
+      //         const newNodes1 = newBlock.children;
+      //         const nodeIndex = nodes.findIndex(n => (n === node));
+      //         const newNodes = nodes.slice(0, nodeIndex).concat(newNodes1, nodes.slice(nodeIndex + newNodes1.length));
+      //         // console.log(nodes);
+      //         // console.log(nodeIndex);
+      //         // console.log(newNodes1);
+      //         // console.log(newNodes);
+      //         // Update cursor
+      //         // cursor.node = newNode;
+      //         // console.log(newNode);
 
-            // TODO: Really need a better way to do this.
-            const blockIndex = blocks.findIndex(b => b === block);
-            const newBlocks = (
-              blocks.slice(0, blockIndex - 1)
-              .concat(
-                newBlock,
-                {
-                  ...block.next,
-                  prev: block,
-                },
-                blocks.slice(blockIndex + 2),
-              )
-            );
-            // TODO: We just deleted a block... How do we update all refs of it?
-            // TODO: Don't mutate like this. At least move to end of function
+      //         // TODO: Really need a better way to do this.
+      //         const blockIndex = blocks.findIndex(b => b === block);
+      //         const newBlocks = (
+      //           blocks.slice(0, blockIndex - 1)
+      //           .concat(
+      //             newBlock,
+      //             {
+      //               ...block.next,
+      //               prev: block,
+      //             },
+      //             blocks.slice(blockIndex + 2),
+      //           )
+      //         );
+      //         // TODO: We just deleted a block... How do we update all refs of it?
+      //         // TODO: Don't mutate like this. At least move to end of function
 
-            this.setState({ blocks: newBlocks, nodes: newNodes });
+      //         this.setState({ blocks: newBlocks, nodes: newNodes });
 
-            console.log(newBlocks);
-          } else {
-            // Backspaced at the beginning of a node, but not beginning of a block
-            if (node.prev.type === "text") {
-              // TODO: Join text nodes?
-            }
-          }
-        } else {
-          // Not at the beginning of a node
-          node.text = node.text.slice(0, structCursor.char - 1) + node.text.slice(structCursor.char);
-          structCursor.char--;
-        }
-      }
-    } else if (key.length === 1) {
-      // Text char
-      const node = nodes[structCursor.node];
-      if (node.type === "text") {
-        node.text =
-          node.text.slice(0, structCursor.char) +
-          key +
-          node.text.slice(structCursor.char);
-        structCursor.char++;
-      }
+      //         console.log(newBlocks);
+      //       } else {
+      //         // Backspaced at the beginning of a node, but not beginning of a block
+      //         if (node.prev.type === "text") {
+      //           // TODO: Join text nodes?
+      //         }
+      //       }
+      //     } else {
+      //       // Not at the beginning of a node
+      //       node.text = node.text.slice(0, cursor.char - 1) + node.text.slice(cursor.char);
+      //       cursor.char--;
+      //     }
+      //   }
+      // } else if (key.length === 1) {
+      //   // Text char
+      //   const node = nodes[cursor.node];
+      //   if (node.type === "text") {
+      //     node.text =
+      //       node.text.slice(0, cursor.char) +
+      //       key +
+      //       node.text.slice(cursor.char);
+      //     cursor.char++;
+      //   }
     } else {
       console.log(key);
     }
 
-    this.setState({ structCursor: structCursor });
+    this.setState({ cursor: cursor });
   }
 
   render() {
@@ -351,18 +423,17 @@ class App extends React.Component {
     });
     const text = lines.join(BLOCK_DELIM);
 
-    // Translate structCursor to textCursor
-    const structCursor = this.state.structCursor;
-    const node = this.state.nodes[structCursor.node];
-    const nodes = this.state.nodes;
-    const nodeIndex = nodes.findIndex((n) => n === node);
-    const nodeCharOffset = nodes
-      .slice(0, nodeIndex)
+    // Translate treeCursor to textCursor
+    const cursor = this.state.cursor;
+    const node = cursor.node;
+    const _previousLeaves = previousLeaves(node);
+    const nodeCharOffset = _previousLeaves
       .map((n) => n.rendered.length)
       .reduce((a, b) => a + b, 0);
+    // TODO: Shitty way to account for newlines
     const block = node.parent;
-    const blockIndex = blocks.findIndex((b) => b === block); // TODO: Shitty way to account for newlines
-    const textCursor = nodeCharOffset + blockIndex + structCursor.char;
+    const blockIndex = blocks.findIndex((b) => b === block);
+    const textCursor = nodeCharOffset + blockIndex + cursor.char;
 
     // Render text with span at cursor position.
     const textWithCursor = [
@@ -380,9 +451,9 @@ class App extends React.Component {
           <div>
             {"Text: " + textCursor}
             {"\nStruct: " +
-              this.state.structCursor.node +
+              this.state.cursor.node +
               ", " +
-              this.state.structCursor.char}
+              this.state.cursor.char}
           </div>
           {renderStructElements(this.state.blocks)}
         </div>
