@@ -1,4 +1,4 @@
-// TODO: Refactor cursor to point to actual node not id?
+// TODO: Introduce isAtomic, openF, closeF?
 import React from "react";
 import ReactDOM from "react-dom";
 import "./index.css";
@@ -15,6 +15,9 @@ let LAST_BLOCK_ID = 0;
 function deserialize(text) {
   // TODO: Can I avoid mutating here? Does it matter?
 
+  // TODO: How do you immutably create circular dependencies?
+  const root = { type: "root" };
+
   // Parse blocks
   let blocks = [];
   const blockTexts = text.split(BLOCK_DELIM);
@@ -30,11 +33,15 @@ function deserialize(text) {
       start: start,
       text: blockTexts[i],
       prev: prev,
+      parent: root,
+      rightDelim: "\n",
     };
     blocks.push(block);
     LAST_BLOCK_ID += 1;
     prev = block;
   }
+
+  root.children = blocks;
 
   // For convenience, each block knows its next block.
   for (let i = 0; i < blocks.length; i++) {
@@ -60,7 +67,6 @@ function deserialize(text) {
       const refStart = match[1];
       const refBlock = startToBlock[refStart];
       if (refBlock == null) {
-        console.log(blocks);
         throw new Error("Block has invalid ref: '" + block.text + "'");
       }
       // TODO: Go from refStart to block? Should we keep a map of refStart -> block?
@@ -81,6 +87,8 @@ function deserialize(text) {
         start: first.start + first.text.length,
         parent: block,
         children: [],
+        leftDelim: "((",
+        rightDelim: "))",
       };
       const third = {
         type: "text",
@@ -105,8 +113,8 @@ function deserialize(text) {
     block.children = children;
   }
 
-  // Each node knows its closest siblings
   blocks.map((block) => {
+    // Each node knows its closest siblings
     for (let i = 0; i < block.children.length; i++) {
       block.children[i].prev = i === 0 ? null : block.children[i - 1];
       block.children[i].next =
@@ -114,8 +122,7 @@ function deserialize(text) {
     }
     return null;
   });
-
-  return blocks;
+  return { node: firstLeaf(root), char: 0 };
 }
 
 function renderStructElements(blocks) {
@@ -174,7 +181,17 @@ function moveLeaf(node, direction) {
   }
 }
 
+function getRoot(node) {
+  let cur = node;
+  // TODO: Cleaner way?
+  while (cur.parent) {
+    cur = cur.parent;
+  }
+  return cur;
+}
+
 // TODO: Should take `cursor` as arg?
+// TODO: getPreviousLeaf?
 function previousLeaf(node) {
   if (node.children.length > 0) {
     throw new Error("Called previousLeaf on a non-leaf node");
@@ -183,6 +200,7 @@ function previousLeaf(node) {
 }
 
 // TODO: Should take `cursor` as arg?
+// TODO: getNextLeaf?
 function nextLeaf(node) {
   if (node.children.length > 0) {
     throw new Error("Called nextLeaf on a non-leaf node");
@@ -190,7 +208,15 @@ function nextLeaf(node) {
   return moveLeaf(node, "next");
 }
 
+function firstLeaf(node) {
+  if (node.children.length === 0) {
+    return node;
+  }
+  return firstLeaf(node.children[0]);
+}
+
 // TODO: Should take `cursor` as arg?
+// TODO: getPreviousLeaves?
 function previousLeaves(node) {
   // TODO: Clean up
   let ret = [];
@@ -214,6 +240,9 @@ function canLeftChar(cursor) {
   return cursor.char > 0;
 }
 
+// TODO: In reality, up and down would need to move along virtual lines
+//       (since blocks may wrap), not blocks. This will be a terrible UX
+//       as it is!
 function upChar(cursor) {
   // TODO: Treat blocks as arbitrary nodes.
   const prev = cursor.node.parent.prev;
@@ -291,28 +320,59 @@ function rightChar(cursor) {
   }
 }
 
+// function replaceNode(cursor, node) {
+//   cursor
+// }
+
+// TODO: depends on replaceNode?
+function insertChar(blocks, cursor, chr) {
+  const node = cursor.node;
+  if (node.type === "text") {
+    node.text =
+      node.text.slice(0, cursor.char) + chr + node.text.slice(cursor.char);
+    cursor.char++;
+  }
+  return [blocks, cursor];
+}
+
+function renderNode(node, withDelim = true) {
+  let rendered = "";
+  if (withDelim) {
+    rendered += _.get(node, "leftDelim", "");
+  }
+  if (node.children.length > 0) {
+    rendered += node.children
+      .map((n) => renderNode(n))
+      .reduce((a, b) => a + b, "");
+  } else if (node.type === "text") {
+    rendered += node.text;
+  } else if (node.type === "ref") {
+    // TODO: Pay cost of double render here.
+    // TODO: Better way than withDelim?
+    rendered += renderNode(node.value, false);
+    console.log(node);
+  }
+  if (withDelim) {
+    rendered += _.get(node, "rightDelim", "");
+  }
+  // TODO: Avoid mutation...
+  node.rendered = rendered;
+  return rendered;
+}
+
 class App extends React.Component {
   constructor(props) {
     super(props);
-    const blocks = deserialize(TEXT);
+    const cursor = deserialize(TEXT);
     this.state = {
-      blocks: blocks,
       // TODO: Make this take a path?
-      cursor: { node: blocks[0].children[0], char: 0 },
+      cursor: cursor,
     };
     this.handleKeyDown = this.handleKeyDown.bind(this);
   }
 
   handleKeyDown(event) {
     let cursor = this.state.cursor;
-
-    // The cursor moves along nodes, and we easily translate from
-    // that to the block and text co-ordinate systems as needed. Nodes know
-    // their position in a block, and blocks know their position in the text.
-
-    // TODO: In reality, up and down would need to move along virtual lines
-    // (since blocks may wrap), not blocks. This will be a terrible UX as it
-    // is!
 
     const key = event.key;
     if (key === "ArrowUp") {
@@ -391,54 +451,25 @@ class App extends React.Component {
       //     }
       //   }
       // } else if (key.length === 1) {
-      //   // Text char
-      //   const node = nodes[cursor.node];
-      //   if (node.type === "text") {
-      //     node.text =
-      //       node.text.slice(0, cursor.char) +
-      //       key +
-      //       node.text.slice(cursor.char);
-      //     cursor.char++;
-      //   }
+      //   [blocks, cursor] = insertChar(blocks, cursor, key);
     } else {
       console.log(key);
     }
 
+    // this.setState({ blocks: blocks, cursor: cursor });
     this.setState({ cursor: cursor });
   }
 
   render() {
     // Serialize blocks to text
-    const blocks = this.state.blocks;
-    const lines = blocks.map((block) => {
-      const nodeTexts = block.children.map((node) => {
-        if (node.type === "text") {
-          node.rendered = node.text;
-          return node.rendered;
-        } else if (node.type === "ref") {
-          // TODO: If we want text as both interface and persistance layer,
-          // how do we ALSO do WYSIWYG in that interface? E.g. replacing ((1))
-          // with stylised text of block 1 isn't respecting the persistance
-          // layer.
-          // In other words, do we render raw text or stylised divs?
-          const refBlock = node.value;
-          // TODO: Adding brackets because we're rendering raw unstylised text,
-          // but we still need some indication that it's a ref. See todo above.
-          node.rendered = "((" + refBlock.text + "))";
-          return node.rendered;
-        } else {
-          throw new Error("Unknown node type: " + node.type);
-        }
-      });
-      return nodeTexts.join("");
-    });
-    const text = lines.join(BLOCK_DELIM);
+    const cursor = this.state.cursor;
+    const root = getRoot(cursor.node);
+    const text = renderNode(root);
 
     // Translate treeCursor to textCursor
-    const cursor = this.state.cursor;
+    const blocks = getRoot(cursor.node).children;
     const node = cursor.node;
-    const _previousLeaves = previousLeaves(node);
-    const nodeCharOffset = _previousLeaves
+    const nodeCharOffset = previousLeaves(node)
       .map((n) => n.rendered.length)
       .reduce((a, b) => a + b, 0);
     // TODO: Shitty way to account for newlines
@@ -466,7 +497,7 @@ class App extends React.Component {
               ", " +
               this.state.cursor.char}
           </div>
-          {renderStructElements(this.state.blocks)}
+          {renderStructElements(blocks)}
         </div>
       </div>
     );
