@@ -230,6 +230,61 @@ function previousLeaves(node) {
   return ret;
 }
 
+// TODO: Should take `cursor` as arg?
+// TODO: getPreviousNodes?
+// TODO: This is where I wonder if a tree makes sense...
+//       Since we partition text...
+//       Like a nested list over chars or something
+// function dfs(node, visited = []) {
+//   let ret = [node];
+//   if (node.children.length === 0) {
+//     return ret;
+//   }
+//     return visited.concat(node).concat(pre
+//   return dfs(
+
+
+
+//   // TODO: Clean up
+//   let ret = [];
+//   let cur = node;
+//   while (cur) {
+//     cur = previousLeaf(cur);
+//     if (cur) {
+//       ret.push(cur);
+//     }
+//   }
+//   return ret;
+// }
+
+// TODO: Clean up
+// TODO: Can we reuse logic between this and renderNode
+function* getNodeStarts(node, start = 0) {
+  yield [node, start];
+  start += _.get(node, "leftDelim", "").length;
+  if (node.children.length > 0) {
+    for (const n of node.children) {
+      start = yield * getNodeStarts(n, start);
+    }
+  } else {
+    start += node.text.length;
+  }
+  start += _.get(node, "rightDelim", "").length;
+  return start;
+}
+
+function getTextCursor(cursor) {
+  // TODO: Really not a better way?
+  let start = null;
+  for (const [n, s] of getNodeStarts(getRoot(cursor.node))) {
+    start = s;
+    if (n === cursor.node) {
+      break;
+    }
+  }
+  return start + cursor.char;
+}
+
 // TODO: atNodeEnd?
 function canRightChar(cursor) {
   return cursor.char < cursor.node.text.length;
@@ -349,8 +404,9 @@ function renderNode(node, withDelim = true) {
   } else if (node.type === "ref") {
     // TODO: Pay cost of double render here.
     // TODO: Better way than withDelim?
-    rendered += renderNode(node.value, false);
-    console.log(node);
+    // TODO: Avoid mutation...
+    node.text = renderNode(node.value, false);
+    rendered += node.text;
   }
   if (withDelim) {
     rendered += _.get(node, "rightDelim", "");
@@ -461,21 +517,9 @@ class App extends React.Component {
   }
 
   render() {
-    // Serialize blocks to text
     const cursor = this.state.cursor;
-    const root = getRoot(cursor.node);
-    const text = renderNode(root);
-
-    // Translate treeCursor to textCursor
-    const blocks = getRoot(cursor.node).children;
-    const node = cursor.node;
-    const nodeCharOffset = previousLeaves(node)
-      .map((n) => n.rendered.length)
-      .reduce((a, b) => a + b, 0);
-    // TODO: Shitty way to account for newlines
-    const block = node.parent;
-    const blockIndex = blocks.findIndex((b) => b === block);
-    const textCursor = nodeCharOffset + blockIndex + cursor.char;
+    const text = renderNode(getRoot(cursor.node));
+    const textCursor = getTextCursor(cursor);
 
     // Render text with span at cursor position.
     const textWithCursor = [
@@ -497,7 +541,8 @@ class App extends React.Component {
               ", " +
               this.state.cursor.char}
           </div>
-          {renderStructElements(blocks)}
+          // NEXT: Rid of this shit
+          {renderStructElements(getRoot(cursor.node).children)}
         </div>
       </div>
     );
