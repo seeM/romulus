@@ -105,11 +105,15 @@ function deserialize(text) {
     block.children = children;
   }
 
-  // For convenience, each node knows its previous and next node.
-  for (let i = 0; i < nodes.length; i++) {
-    nodes[i].prev = i === 0 ? null : nodes[i - 1];
-    nodes[i].next = i + 1 === nodes.length ? null : nodes[i + 1];
-  }
+  // Each node knows its closest siblings
+  blocks.map((block) => {
+    for (let i = 0; i < block.children.length; i++) {
+      block.children[i].prev = i === 0 ? null : block.children[i - 1];
+      block.children[i].next =
+        i + 1 === block.children.length ? null : block.children[i + 1];
+    }
+    return null;
+  });
 
   return blocks;
 }
@@ -170,6 +174,7 @@ function moveLeaf(node, direction) {
   }
 }
 
+// TODO: Should take `cursor` as arg?
 function previousLeaf(node) {
   if (node.children.length > 0) {
     throw new Error("Called previousLeaf on a non-leaf node");
@@ -177,6 +182,7 @@ function previousLeaf(node) {
   return moveLeaf(node, "prev");
 }
 
+// TODO: Should take `cursor` as arg?
 function nextLeaf(node) {
   if (node.children.length > 0) {
     throw new Error("Called nextLeaf on a non-leaf node");
@@ -184,6 +190,7 @@ function nextLeaf(node) {
   return moveLeaf(node, "next");
 }
 
+// TODO: Should take `cursor` as arg?
 function previousLeaves(node) {
   // TODO: Clean up
   let ret = [];
@@ -197,12 +204,92 @@ function previousLeaves(node) {
   return ret;
 }
 
-// function backward(struct, cursor) {
-//   return [struct, cursor]
-// }
+// TODO: atNodeEnd?
+function canRightChar(cursor) {
+  return cursor.char < cursor.node.text.length;
+}
 
-// function get(struct, cursor) {
-// }
+// TODO: atNodeStart?
+function canLeftChar(cursor) {
+  return cursor.char > 0;
+}
+
+function upChar(cursor) {
+  // TODO: Treat blocks as arbitrary nodes.
+  const prev = cursor.node.parent.prev;
+  if (prev) {
+    // Not at the first block, move to the previous block.
+    // TODO: What if prev has no children?
+    return { ...cursor, node: prev.children[0], char: 0 };
+  } else {
+    // At the first block, do nothing.
+    return cursor;
+  }
+}
+
+function downChar(cursor) {
+  // TODO: Treat blocks as arbitrary nodes.
+  const next = cursor.node.parent.next;
+  if (next) {
+    // Not at the last block, move to the next block.
+    // TODO: What if next has no children?
+    return { ...cursor, node: next.children[0], char: 0 };
+  } else {
+    // At the last block, do nothing.
+    return cursor;
+  }
+}
+
+function leftChar(cursor) {
+  if (canLeftChar(cursor)) {
+    return { ...cursor, char: cursor.char - 1 };
+  } else {
+    const node = cursor.node;
+    const prev = previousLeaf(node);
+    if (prev) {
+      if (prev.parent !== node.parent) {
+        // TODO: Must be a better way to handle this discrepency with text nodes...
+        return { ...cursor, node: prev, char: prev.rendered.length };
+      } else if (prev.type === "text") {
+        return { ...cursor, node: prev, char: prev.rendered.length - 1 };
+      } else if (prev.type === "ref") {
+        // TODO: What if there isn't a previousLeaf(prev)?
+        const prevPrev = previousLeaf(prev);
+        return { ...cursor, node: prevPrev, char: prevPrev.rendered.length };
+      } else {
+        throw new Error("Unknown node type: " + prev.type);
+      }
+    } else {
+      // At the beginning of the first node, do nothing.
+      return cursor;
+    }
+  }
+}
+
+function rightChar(cursor) {
+  if (canRightChar(cursor)) {
+    return { ...cursor, char: cursor.char + 1 };
+  } else {
+    const node = cursor.node;
+    const next = nextLeaf(node);
+    if (next) {
+      if (next.parent !== node.parent) {
+        // TODO: Must be a better way to handle this discrepency...
+        return { ...cursor, node: next, char: 0 };
+      } else if (next.type === "text") {
+        return { ...cursor, node: next, char: 1 };
+      } else if (next.type === "ref") {
+        // TODO: What if there isn't a nextLeaf(next)?
+        return { ...cursor, node: nextLeaf(next), char: 0 };
+      } else {
+        throw new Error("Unknown node type: " + node.type);
+      }
+    } else {
+      // At the end of the last node, do nothing.
+      return cursor;
+    }
+  }
+}
 
 class App extends React.Component {
   constructor(props) {
@@ -229,89 +316,13 @@ class App extends React.Component {
 
     const key = event.key;
     if (key === "ArrowUp") {
-      const prev = cursor.node.parent.prev;
-      if (prev) {
-        // Not at the first block, move to the previous block.
-        cursor.block = prev;
-        cursor.node = prev.children[0];
-        cursor.char = 0;
-      } else {
-        // At the first block, do nothing.
-      }
+      cursor = upChar(cursor);
     } else if (key === "ArrowDown") {
-      const next = cursor.node.parent.next;
-      if (next) {
-        // Not at the last block, move to the next block.
-        cursor.block = next;
-        cursor.node = next.children[0];
-        cursor.char = 0;
-      } else {
-        // At the last block, do nothing.
-      }
-      // } else if (key === "ArrowLeft") {
-      //   if (cursor.char <= 0) {
-      //     // At the beginning of a node.
-      //     if (cursor.node <= 0) {
-      //       // At the beginning of the first node, do nothing.
-      //     } else {
-      //       // At the beginning of a node.
-      //       const node = nodes[cursor.node];
-      //       const prev = node.prev;
-      //       if (prev.parent !== node.parent) {
-      //         // Moved to a new block.
-      //         cursor.node--;
-      //         cursor.char = prev.rendered.length - 1;
-      //       } else if (prev.type === "text") {
-      //         // Go to the last char of the previous node.
-      //         cursor.node--;
-      //         cursor.char = prev.rendered.length - 1;
-      //       } else if (prev.type === "ref") {
-      //         // Go passed the last char of the 2x previous node.
-      //         cursor.node -= 2;
-      //         // TODO: What if there's no previous node?
-      //         cursor.char = prev.prev.rendered.length;
-      //       } else {
-      //         throw new Error("Unknown node type: " + prev.type);
-      //       }
-      //     }
-      //   } else {
-      //     // Not at the beginning of a node
-      //     // Go back one char.
-      //     cursor.char--;
-      //   }
-      // } else if (key === "ArrowRight") {
-      //   if (cursor.char >= nodes[cursor.node].text.length) {
-      //     // At the end of a node.
-      //     if (cursor.node >= nodes.length - 1) {
-      //       // At the end of the last node, do nothing.
-      //     } else {
-      //       // At the end of a node.
-      //       const node = nodes[cursor.node].next;
-      //       if (node.parent !== nodes[cursor.node].parent) {
-      //         // Moved to a new block.
-      //         cursor.node++;
-      //         cursor.char = 0;
-      //       } else if (node.type === "text") {
-      //         // Move one char into the next node.
-      //         cursor.node++;
-      //         cursor.char = 1;
-      //       } else if (node.type === "ref") {
-      //         // Go forward passed the ref's rendered text.
-      //         // TODO: This ain't good because we're contaminating cursor movement with rendering logic.
-      //         // I.e. the assumption about how refs are rendered... Need a better way!
-      //         // cursor.char += BLOCK_REF_DELIM_LENGTH + node.value.text.length;
-      //         cursor.node += 2;
-      //         cursor.char = 0;
-      //         // TODO: Can't we just move to the next node? And deal with where these nodes are within a block
-      //         // only at text render time??? Booyakasha
-      //       } else {
-      //         throw new Error("Unknown node type: " + node.type);
-      //       }
-      //     }
-      //   } else {
-      //     // Not at the end of a node, go forward one char.
-      //     cursor.char++;
-      //   }
+      cursor = downChar(cursor);
+    } else if (key === "ArrowLeft") {
+      cursor = leftChar(cursor);
+    } else if (key === "ArrowRight") {
+      cursor = rightChar(cursor);
       // } else if (key === "Backspace") {
       //   const node = nodes[cursor.node];
       //   // TODO: Block management could exist outside of the interface layer completely...
@@ -451,7 +462,7 @@ class App extends React.Component {
           <div>
             {"Text: " + textCursor}
             {"\nStruct: " +
-              this.state.cursor.node +
+              this.state.cursor.node.text +
               ", " +
               this.state.cursor.char}
           </div>
