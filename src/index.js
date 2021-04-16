@@ -1,8 +1,9 @@
 // TODO: Introduce isAtomic, openF, closeF?
+// TODO: Block children atm == inlines, but what about a block having other children that are blocks?
+//       i.e. outlining...
 import React from "react";
 import ReactDOM from "react-dom";
 import "./index.css";
-var _ = require("lodash");
 
 // Some text to play with
 // TODO: We can't really deal with empty text nodes yet
@@ -130,15 +131,13 @@ function deserialize(text) {
 // }
 
 function firstDescendant(node) {
-  return node.children.length === 0
-    ? node
-    : firstDescendant(_.first(node.children));
+  return node.children.length === 0 ? node : firstDescendant(node.children[0]);
 }
 
 function lastDescendant(node) {
   return node.children.length === 0
     ? node
-    : lastDescendant(_.last(node.children));
+    : lastDescendant(node.children[node.children.length - 1]);
 }
 
 function moveLeaf(node, direction) {
@@ -164,13 +163,18 @@ function moveLeaf(node, direction) {
   }
 }
 
+// function iterAncestors(node) {
+//   while (node) {
+//     yield node;
+//     node = node.parent;
+//   }
+// }
+
 function getRoot(node) {
-  let cur = node;
-  // TODO: Cleaner way?
-  while (cur.parent) {
-    cur = cur.parent;
+  while (node.parent) {
+    node = node.parent;
   }
-  return cur;
+  return node;
 }
 
 // TODO: Should take `cursor` as arg?
@@ -200,30 +204,26 @@ function firstLeaf(node) {
 
 // TODO: Clean up
 // TODO: Can we reuse logic between this and renderNode
-function* getNodeStarts(node, start = 0) {
+function* iterNodeStarts(node, start = 0) {
   yield [node, start];
-  start += _.get(node, "leftDelim", "").length;
+  start += (node.leftDelim ?? "").length;
   if (node.children.length > 0) {
     for (const n of node.children) {
-      start = yield* getNodeStarts(n, start);
+      start = yield* iterNodeStarts(n, start);
     }
   } else {
     start += node.text.length;
   }
-  start += _.get(node, "rightDelim", "").length;
+  start += (node.rightDelim ?? "").length;
   return start;
 }
 
 function getTextCursor(cursor) {
-  // TODO: Really not a better way?
-  let start = null;
-  for (const [n, s] of getNodeStarts(getRoot(cursor.node))) {
-    start = s;
-    if (n === cursor.node) {
-      break;
-    }
-  }
-  return start + cursor.char;
+  return (
+    [...iterNodeStarts(getRoot(cursor.node))].find(
+      ([node]) => node === cursor.node
+    )[1] + cursor.char
+  );
 }
 
 // TODO: atNodeEnd?
@@ -316,25 +316,116 @@ function rightChar(cursor) {
   }
 }
 
-// function replaceNode(cursor, node) {
-//   cursor
-// }
-
-// TODO: depends on replaceNode?
-function insertChar(blocks, cursor, chr) {
+function insertChar(cursor, chr) {
+  // TODO: Avoid mutation
   const node = cursor.node;
   if (node.type === "text") {
     node.text =
       node.text.slice(0, cursor.char) + chr + node.text.slice(cursor.char);
     cursor.char++;
   }
-  return [blocks, cursor];
 }
+
+function deleteChar(cursor) {
+  const node = cursor.node;
+  if (node.type === "text") {
+    if (canRightChar(cursor)) {
+      // TODO: Avoid mutation
+      node.text =
+        node.text.slice(0, cursor.char) + node.text.slice(cursor.char + 1);
+    } else {
+      // End of block
+      // TODO: Find youngest parent that is a block?
+      // TODO: If it has a `next` and that's a block, joinBlocks
+      //       Delete the block, join children, update all the pointers
+      const nextParent = node.parent.next;
+      if (nextParent) {
+        console.log("Deleting into a block");
+      } else {
+        console.log("End of file");
+        // End of file?
+      }
+    }
+  }
+  return cursor;
+  // - end of node
+  // - end of doc
+}
+
+// function backspaceChar(cursor) {
+//   // TODO: This is just leftChar -> deleteChar?
+//   const node = cursor.node;
+//   // TODO: Block management could exist outside of the interface layer completely...
+//   if (node.type === "text") {
+//     if (canLeftChar(cursor)) {
+//       // TODO: Avoid mutation
+//       node.text = node.text.slice(0, cursor.char - 1) + node.text.slice(cursor.char);
+//       cursor.char--;
+//     } else {
+//       // At the beginning of a node
+//       if (node.prev && node.prev.parent !== node.parent) {
+//         // Backspaced from beginning of a block
+
+//         // Delete the block and update all the pointers
+//         const block = node.parent;
+//         const blocks = this.state.blocks;
+//         // TODO: Updating the pointers is really a shit show maintaining all of this stuff...
+//         //       Probably need a tree abstraction somewhere...
+//         console.log(block);
+//         let newBlock = {
+//           ...block.prev,
+//           children: block.prev.children.concat(block.children),
+//           next: block.next,
+//         };
+//         // TODO: How to make this immutable?
+//         newBlock.children = newBlock.children.map(n => ({...n, parent: newBlock}));
+
+//         // Update nodes list
+//         // NOTE: Have to update *all* of this block's nodes because they were recreated above
+//         const newNodes1 = newBlock.children;
+//         const nodeIndex = nodes.findIndex(n => (n === node));
+//         const newNodes = nodes.slice(0, nodeIndex).concat(newNodes1, nodes.slice(nodeIndex + newNodes1.length));
+//         // console.log(nodes);
+//         // console.log(nodeIndex);
+//         // console.log(newNodes1);
+//         // console.log(newNodes);
+//         // Update cursor
+//         // cursor.node = newNode;
+//         // console.log(newNode);
+
+//         // TODO: Really need a better way to do this.
+//         const blockIndex = blocks.findIndex(b => b === block);
+//         const newBlocks = (
+//           blocks.slice(0, blockIndex - 1)
+//           .concat(
+//             newBlock,
+//             {
+//               ...block.next,
+//               prev: block,
+//             },
+//             blocks.slice(blockIndex + 2),
+//           )
+//         );
+//         // TODO: We just deleted a block... How do we update all refs of it?
+//         // TODO: Don't mutate like this. At least move to end of function
+
+//         this.setState({ blocks: newBlocks, nodes: newNodes });
+
+//         console.log(newBlocks);
+//       } else {
+//         // Backspaced at the beginning of a node, but not beginning of a block
+//         if (node.prev.type === "text") {
+//           // TODO: Join text nodes?
+//         }
+//       }
+//     }
+//   }
+// }
 
 function renderNode(node, withDelim = true) {
   let rendered = "";
   if (withDelim) {
-    rendered += _.get(node, "leftDelim", "");
+    rendered += node.leftDelim ?? "";
   }
   if (node.children.length > 0) {
     rendered += node.children
@@ -350,7 +441,7 @@ function renderNode(node, withDelim = true) {
     rendered += node.text;
   }
   if (withDelim) {
-    rendered += _.get(node, "rightDelim", "");
+    rendered += node.rightDelim ?? "";
   }
   // TODO: Avoid mutation...
   node.rendered = rendered;
@@ -364,8 +455,8 @@ function renderText(node, cursor) {
     [
       text.slice(0, textCursor),
       <div className="TextAfter">
-      <span className="Cursor"></span>
-      {text.slice(textCursor)}
+        <span className="Cursor"></span>
+        {text.slice(textCursor)}
       </div>,
     ],
     textCursor,
@@ -418,74 +509,11 @@ class App extends React.Component {
     } else if (key === "ArrowRight") {
       cursor = rightChar(cursor);
       // } else if (key === "Backspace") {
-      //   const node = nodes[cursor.node];
-      //   // TODO: Block management could exist outside of the interface layer completely...
-      //   if (node.type === "text") {
-      //     if (cursor.char <= 0) {
-      //       // At the beginning of a node
-      //       if (node.prev && node.prev.parent !== node.parent) {
-      //         // Backspaced from beginning of a block
-
-      //         // Delete the block and update all the pointers
-      //         const block = node.parent;
-      //         const blocks = this.state.blocks;
-      //         // TODO: Updating the pointers is really a shit show maintaining all of this stuff...
-      //         //       Probably need a tree abstraction somewhere...
-      //         console.log(block);
-      //         let newBlock = {
-      //           ...block.prev,
-      //           children: block.prev.children.concat(block.children),
-      //           next: block.next,
-      //         };
-      //         // TODO: How to make this immutable?
-      //         newBlock.children = newBlock.children.map(n => ({...n, parent: newBlock}));
-
-      //         // Update nodes list
-      //         // NOTE: Have to update *all* of this block's nodes because they were recreated above
-      //         const newNodes1 = newBlock.children;
-      //         const nodeIndex = nodes.findIndex(n => (n === node));
-      //         const newNodes = nodes.slice(0, nodeIndex).concat(newNodes1, nodes.slice(nodeIndex + newNodes1.length));
-      //         // console.log(nodes);
-      //         // console.log(nodeIndex);
-      //         // console.log(newNodes1);
-      //         // console.log(newNodes);
-      //         // Update cursor
-      //         // cursor.node = newNode;
-      //         // console.log(newNode);
-
-      //         // TODO: Really need a better way to do this.
-      //         const blockIndex = blocks.findIndex(b => b === block);
-      //         const newBlocks = (
-      //           blocks.slice(0, blockIndex - 1)
-      //           .concat(
-      //             newBlock,
-      //             {
-      //               ...block.next,
-      //               prev: block,
-      //             },
-      //             blocks.slice(blockIndex + 2),
-      //           )
-      //         );
-      //         // TODO: We just deleted a block... How do we update all refs of it?
-      //         // TODO: Don't mutate like this. At least move to end of function
-
-      //         this.setState({ blocks: newBlocks, nodes: newNodes });
-
-      //         console.log(newBlocks);
-      //       } else {
-      //         // Backspaced at the beginning of a node, but not beginning of a block
-      //         if (node.prev.type === "text") {
-      //           // TODO: Join text nodes?
-      //         }
-      //       }
-      //     } else {
-      //       // Not at the beginning of a node
-      //       node.text = node.text.slice(0, cursor.char - 1) + node.text.slice(cursor.char);
-      //       cursor.char--;
-      //     }
-      //   }
-      // } else if (key.length === 1) {
-      //   [blocks, cursor] = insertChar(blocks, cursor, key);
+      //   cursor = backspaceChar(cursor);
+    } else if (key === "Delete") {
+      cursor = deleteChar(cursor);
+    } else if (key.length === 1) {
+      insertChar(cursor, key);
     } else {
       console.log(key);
     }
