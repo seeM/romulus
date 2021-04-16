@@ -220,46 +220,6 @@ function firstLeaf(node) {
   return firstLeaf(node.children[0]);
 }
 
-// TODO: Should take `cursor` as arg?
-// TODO: getPreviousLeaves?
-function previousLeaves(node) {
-  // TODO: Clean up
-  let ret = [];
-  let cur = node;
-  while (cur) {
-    cur = previousLeaf(cur);
-    if (cur) {
-      ret.push(cur);
-    }
-  }
-  return ret;
-}
-
-// TODO: Should take `cursor` as arg?
-// TODO: getPreviousNodes?
-// TODO: This is where I wonder if a tree makes sense...
-//       Since we partition text...
-//       Like a nested list over chars or something
-// function dfs(node, visited = []) {
-//   let ret = [node];
-//   if (node.children.length === 0) {
-//     return ret;
-//   }
-//     return visited.concat(node).concat(pre
-//   return dfs(
-
-//   // TODO: Clean up
-//   let ret = [];
-//   let cur = node;
-//   while (cur) {
-//     cur = previousLeaf(cur);
-//     if (cur) {
-//       ret.push(cur);
-//     }
-//   }
-//   return ret;
-// }
-
 // TODO: Clean up
 // TODO: Can we reuse logic between this and renderNode
 function* getNodeStarts(node, start = 0) {
@@ -419,6 +379,21 @@ function renderNode(node, withDelim = true) {
   return rendered;
 }
 
+function renderText(node, cursor) {
+  const text = renderNode(node);
+  const textCursor = getTextCursor(cursor);
+  return [
+    [
+      text.slice(0, textCursor),
+      <div className="TextAfter">
+      <span className="Cursor"></span>
+      {text.slice(textCursor)}
+      </div>,
+    ],
+    textCursor,
+  ];
+}
+
 class App extends React.Component {
   constructor(props) {
     super(props);
@@ -522,22 +497,11 @@ class App extends React.Component {
   render() {
     const cursor = this.state.cursor;
     const root = getRoot(cursor.node);
-    const text = renderNode(root);
-    const textCursor = getTextCursor(cursor);
+    const [text, textCursor] = renderText(root, cursor);
     const struct = renderStructElements(root);
-
-    // Render text with span at cursor position.
-    const textWithCursor = [
-      text.slice(0, textCursor),
-      <div className="TextAfter">
-        <span className="Cursor"></span>
-        {text.slice(textCursor)}
-      </div>,
-    ];
-
     return (
       <div className="App">
-        <div className="Text">{textWithCursor}</div>
+        <div className="Text">{text}</div>
         <div className="Structure" onKeyDown={this.handleKeyDown} tabIndex="0">
           <div>
             {"Text: " + textCursor}
