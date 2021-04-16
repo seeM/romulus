@@ -125,28 +125,6 @@ function deserialize(text) {
   return { node: firstLeaf(root), char: 0 };
 }
 
-function renderStructElements(node) {
-  let renderedChildren = [];
-  if (node.children.length > 0) {
-    renderedChildren = node.children.map(renderStructElements);
-  }
-  if (node.type === "root" || node.type === "block") {
-    return (
-      <div className={"node-" + node.type}>
-        {"[" + node.type + "]"} {"start: " + node.start}
-        {renderedChildren}
-      </div>
-    );
-  } else {
-    return (
-      <div className={"node-" + node.type}>
-        {"[" + node.type + "]"} {"text: " + node.text}{" "}
-        {", value: " + node.value} {", start: " + node.start}
-      </div>
-    );
-  }
-}
-
 // function previousNode(nodes, node) {
 //   return node.prev;
 // }
@@ -392,6 +370,28 @@ function renderText(node, cursor) {
     ],
     textCursor,
   ];
+}
+
+function renderStructElements(node) {
+  let renderedChildren = [];
+  if (node.children.length > 0) {
+    renderedChildren = node.children.map(renderStructElements);
+  }
+  if (node.type === "root" || node.type === "block") {
+    return (
+      <div className={"node-" + node.type}>
+        {"[" + node.type + "]"} {"start: " + node.start}
+        {renderedChildren}
+      </div>
+    );
+  } else {
+    return (
+      <div className={"node-" + node.type}>
+        {"[" + node.type + "]"} {"text: " + node.text}{" "}
+        {", value: " + node.value} {", start: " + node.start}
+      </div>
+    );
+  }
 }
 
 class App extends React.Component {
