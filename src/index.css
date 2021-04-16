@@ -53,6 +53,12 @@ textarea {
   background-color: lightgrey;
 }
 
+.node-root {
+  margin: 10px;
+  background-color: grey;
+  color: white;
+}
+
 .node-block {
   margin: 10px;
   background-color: green;

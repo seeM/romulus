@@ -16,7 +16,7 @@ function deserialize(text) {
   // TODO: Can I avoid mutating here? Does it matter?
 
   // TODO: How do you immutably create circular dependencies?
-  const root = { type: "root" };
+  const root = { type: "root", start: 0 };
 
   // Parse blocks
   let blocks = [];
@@ -125,21 +125,26 @@ function deserialize(text) {
   return { node: firstLeaf(root), char: 0 };
 }
 
-function renderStructElements(blocks) {
-  // TODO: This is a super naive struct renderer
-  return blocks.map((block) => {
-    let children = block.children.map((child) => (
-      <div className={"node-" + child.type}>
-        {"[" + child.type + "]"} {"text: " + child.text}{" "}
-        {", value: " + child.value} {", start: " + child.start}
-      </div>
-    ));
+function renderStructElements(node) {
+  let renderedChildren = [];
+  if (node.children.length > 0) {
+    renderedChildren = node.children.map(renderStructElements);
+  }
+  if (node.type === "root" || node.type === "block") {
     return (
-      <div className={"node-" + block.type}>
-        {"[" + block.type + "]"} {"start: " + block.start} {children}
+      <div className={"node-" + node.type}>
+        {"[" + node.type + "]"} {"start: " + node.start}
+        {renderedChildren}
       </div>
     );
-  });
+  } else {
+    return (
+      <div className={"node-" + node.type}>
+        {"[" + node.type + "]"} {"text: " + node.text}{" "}
+        {", value: " + node.value} {", start: " + node.start}
+      </div>
+    );
+  }
 }
 
 // function previousNode(nodes, node) {
@@ -243,8 +248,6 @@ function previousLeaves(node) {
 //     return visited.concat(node).concat(pre
 //   return dfs(
 
-
-
 //   // TODO: Clean up
 //   let ret = [];
 //   let cur = node;
@@ -264,7 +267,7 @@ function* getNodeStarts(node, start = 0) {
   start += _.get(node, "leftDelim", "").length;
   if (node.children.length > 0) {
     for (const n of node.children) {
-      start = yield * getNodeStarts(n, start);
+      start = yield* getNodeStarts(n, start);
     }
   } else {
     start += node.text.length;
@@ -518,8 +521,10 @@ class App extends React.Component {
 
   render() {
     const cursor = this.state.cursor;
-    const text = renderNode(getRoot(cursor.node));
+    const root = getRoot(cursor.node);
+    const text = renderNode(root);
     const textCursor = getTextCursor(cursor);
+    const struct = renderStructElements(root);
 
     // Render text with span at cursor position.
     const textWithCursor = [
@@ -541,8 +546,7 @@ class App extends React.Component {
               ", " +
               this.state.cursor.char}
           </div>
-          // NEXT: Rid of this shit
-          {renderStructElements(getRoot(cursor.node).children)}
+          {struct}
         </div>
       </div>
     );
