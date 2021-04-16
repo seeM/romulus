@@ -13,10 +13,8 @@ const BLOCK_DELIM = "\n";
 const BLOCK_REF_PATTERN = /\(\((.*)\)\)/;
 let LAST_BLOCK_ID = 0;
 
+// TODO: Clean this shit up
 function deserialize(text) {
-  // TODO: Can I avoid mutating here? Does it matter?
-
-  // TODO: How do you immutably create circular dependencies?
   const root = { type: "root", start: 0 };
 
   // Parse blocks
@@ -49,7 +47,6 @@ function deserialize(text) {
     blocks[i].next = i + 1 === blocks.length ? null : blocks[i + 1];
   }
 
-  // TODO: Functional?
   const startToBlock = {};
   blocks.map((block) => {
     startToBlock[block.start] = block;
@@ -60,7 +57,7 @@ function deserialize(text) {
   let nodes = [];
   for (let i = 0; i < blocks.length; i++) {
     let block = blocks[i];
-    // TODO: This is a super naive parser...
+    // TODO: Super naive parser
     // Parse block references
     let children = [];
     const match = block.text.match(BLOCK_REF_PATTERN);
@@ -70,7 +67,6 @@ function deserialize(text) {
       if (refBlock == null) {
         throw new Error("Block has invalid ref: '" + block.text + "'");
       }
-      // TODO: Go from refStart to block? Should we keep a map of refStart -> block?
       const plainText = block.text.split(match[0]);
       // Node starts are relative to their containing block.
       const first = {
@@ -126,10 +122,6 @@ function deserialize(text) {
   return { node: firstLeaf(root), char: 0 };
 }
 
-// function previousNode(nodes, node) {
-//   return node.prev;
-// }
-
 function firstDescendant(node) {
   return node.children.length === 0 ? node : firstDescendant(node.children[0]);
 }
@@ -163,13 +155,6 @@ function moveLeaf(node, direction) {
   }
 }
 
-// function iterAncestors(node) {
-//   while (node) {
-//     yield node;
-//     node = node.parent;
-//   }
-// }
-
 function getRoot(node) {
   while (node.parent) {
     node = node.parent;
@@ -177,20 +162,16 @@ function getRoot(node) {
   return node;
 }
 
-// TODO: Should take `cursor` as arg?
-// TODO: getPreviousLeaf?
-function previousLeaf(node) {
+function getPreviousLeaf(node) {
   if (node.children.length > 0) {
-    throw new Error("Called previousLeaf on a non-leaf node");
+    throw new Error("Called getPreviousLeaf on a non-leaf node");
   }
   return moveLeaf(node, "prev");
 }
 
-// TODO: Should take `cursor` as arg?
-// TODO: getNextLeaf?
-function nextLeaf(node) {
+function getNextLeaf(node) {
   if (node.children.length > 0) {
-    throw new Error("Called nextLeaf on a non-leaf node");
+    throw new Error("Called getNextLeaf on a non-leaf node");
   }
   return moveLeaf(node, "next");
 }
@@ -202,7 +183,6 @@ function firstLeaf(node) {
   return firstLeaf(node.children[0]);
 }
 
-// TODO: Clean up
 // TODO: Can we reuse logic between this and renderNode
 function* iterNodeStarts(node, start = 0) {
   yield [node, start];
@@ -226,13 +206,11 @@ function getTextCursor(cursor) {
   );
 }
 
-// TODO: atNodeEnd?
-function canRightChar(cursor) {
+function atNodeEnd(cursor) {
   return cursor.char < cursor.node.text.length;
 }
 
-// TODO: atNodeStart?
-function canLeftChar(cursor) {
+function atNodeStart(cursor) {
   return cursor.char > 0;
 }
 
@@ -266,11 +244,11 @@ function downChar(cursor) {
 }
 
 function leftChar(cursor) {
-  if (canLeftChar(cursor)) {
+  if (atNodeStart(cursor)) {
     return { ...cursor, char: cursor.char - 1 };
   } else {
     const node = cursor.node;
-    const prev = previousLeaf(node);
+    const prev = getPreviousLeaf(node);
     if (prev) {
       if (prev.parent !== node.parent) {
         // TODO: Must be a better way to handle this discrepency with text nodes...
@@ -278,8 +256,8 @@ function leftChar(cursor) {
       } else if (prev.type === "text") {
         return { ...cursor, node: prev, char: prev.rendered.length - 1 };
       } else if (prev.type === "ref") {
-        // TODO: What if there isn't a previousLeaf(prev)?
-        const prevPrev = previousLeaf(prev);
+        // TODO: What if there isn't a getPreviousLeaf(prev)?
+        const prevPrev = getPreviousLeaf(prev);
         return { ...cursor, node: prevPrev, char: prevPrev.rendered.length };
       } else {
         throw new Error("Unknown node type: " + prev.type);
@@ -292,11 +270,11 @@ function leftChar(cursor) {
 }
 
 function rightChar(cursor) {
-  if (canRightChar(cursor)) {
+  if (atNodeEnd(cursor)) {
     return { ...cursor, char: cursor.char + 1 };
   } else {
     const node = cursor.node;
-    const next = nextLeaf(node);
+    const next = getNextLeaf(node);
     if (next) {
       if (next.parent !== node.parent) {
         // TODO: Must be a better way to handle this discrepency...
@@ -304,8 +282,8 @@ function rightChar(cursor) {
       } else if (next.type === "text") {
         return { ...cursor, node: next, char: 1 };
       } else if (next.type === "ref") {
-        // TODO: What if there isn't a nextLeaf(next)?
-        return { ...cursor, node: nextLeaf(next), char: 0 };
+        // TODO: What if there isn't a getNextLeaf(next)?
+        return { ...cursor, node: getNextLeaf(next), char: 0 };
       } else {
         throw new Error("Unknown node type: " + node.type);
       }
@@ -329,7 +307,7 @@ function insertChar(cursor, chr) {
 function deleteChar(cursor) {
   const node = cursor.node;
   if (node.type === "text") {
-    if (canRightChar(cursor)) {
+    if (atNodeEnd(cursor)) {
       // TODO: Avoid mutation
       node.text =
         node.text.slice(0, cursor.char) + node.text.slice(cursor.char + 1);
@@ -357,7 +335,7 @@ function deleteChar(cursor) {
 //   const node = cursor.node;
 //   // TODO: Block management could exist outside of the interface layer completely...
 //   if (node.type === "text") {
-//     if (canLeftChar(cursor)) {
+//     if (atNodeStart(cursor)) {
 //       // TODO: Avoid mutation
 //       node.text = node.text.slice(0, cursor.char - 1) + node.text.slice(cursor.char);
 //       cursor.char--;
@@ -490,7 +468,6 @@ class App extends React.Component {
     super(props);
     const cursor = deserialize(TEXT);
     this.state = {
-      // TODO: Make this take a path?
       cursor: cursor,
     };
     this.handleKeyDown = this.handleKeyDown.bind(this);
@@ -518,7 +495,6 @@ class App extends React.Component {
       console.log(key);
     }
 
-    // this.setState({ blocks: blocks, cursor: cursor });
     this.setState({ cursor: cursor });
   }
 
