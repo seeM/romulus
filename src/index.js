@@ -155,6 +155,13 @@ function moveLeaf(node, direction) {
   }
 }
 
+function* iterAncestors(node) {
+  do {
+    yield node;
+    node = node.parent;
+  } while (node)
+}
+
 function getRoot(node) {
   while (node.parent) {
     node = node.parent;
@@ -183,7 +190,7 @@ function firstLeaf(node) {
   return firstLeaf(node.children[0]);
 }
 
-// TODO: Can we reuse logic between this and renderNode
+// TODO: Can we reuse logic between this and updateNodeRendered
 function* iterNodeStarts(node, start = 0) {
   yield [node, start];
   start += (node.leftDelim ?? "").length;
@@ -316,6 +323,19 @@ function deleteChar(cursor) {
       // TODO: Find youngest parent that is a block?
       // TODO: If it has a `next` and that's a block, joinBlocks
       //       Delete the block, join children, update all the pointers
+      // TODO: Probably an efficient way to do this from root based on cursor position and intervals...
+      const ancestors = [...iterAncestors(cursor.node)].reverse();
+      for (const parent of ancestors) {
+        console.log(parent);
+        // TODO: How do we figure out whether we're at the end of another node?
+        //       Basically, how do we translate the cursor from one node's co-ordinate system to one
+        //       if its ancestors?
+        //       At this point, might be simpler to start with textCursor and kinda binary search
+        //       down the tree to the node(s) we care about...
+        //       But let's not do that for now... Let's translateCursor(cursor, node)
+        if (node.type === "block") {
+        }
+      }
       const nextParent = node.parent.next;
       if (nextParent) {
         console.log("Deleting into a block");
@@ -400,14 +420,14 @@ function deleteChar(cursor) {
 //   }
 // }
 
-function renderNode(node, withDelim = true) {
+function updateNodeRendered(node, withDelim = true) {
   let rendered = "";
   if (withDelim) {
     rendered += node.leftDelim ?? "";
   }
   if (node.children.length > 0) {
     rendered += node.children
-      .map((n) => renderNode(n))
+      .map((n) => updateNodeRendered(n))
       .reduce((a, b) => a + b, "");
   } else if (node.type === "text") {
     rendered += node.text;
@@ -415,7 +435,7 @@ function renderNode(node, withDelim = true) {
     // TODO: Pay cost of double render here.
     // TODO: Better way than withDelim?
     // TODO: Avoid mutation...
-    node.text = renderNode(node.value, false);
+    node.text = updateNodeRendered(node.value, false);
     rendered += node.text;
   }
   if (withDelim) {
@@ -426,8 +446,14 @@ function renderNode(node, withDelim = true) {
   return rendered;
 }
 
+function updateNodeStart(node) {
+  for (const [n, s] of iterNodeStarts(node)) {
+    n.start = s;
+  }
+}
+
 function renderText(node, cursor) {
-  const text = renderNode(node);
+  const text = node.rendered;
   const textCursor = getTextCursor(cursor);
   return [
     [
@@ -470,6 +496,10 @@ class App extends React.Component {
     this.state = {
       cursor: cursor,
     };
+
+    // TODO: Any way to avoid having to do this here as well?
+    updateNodeRendered(getRoot(cursor.node));
+
     this.handleKeyDown = this.handleKeyDown.bind(this);
   }
 
@@ -494,6 +524,11 @@ class App extends React.Component {
     } else {
       console.log(key);
     }
+
+    // Update nodes given changes
+    const root = getRoot(cursor.node);
+    updateNodeRendered(root);
+    updateNodeStart(root);
 
     this.setState({ cursor: cursor });
   }
