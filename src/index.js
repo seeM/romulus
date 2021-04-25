@@ -1,3 +1,4 @@
+// TODO: Can I pull projection(...) one level above insertChar, deleteChar, etc?
 // TODO: Fixes to atNode{Start,End} broke something else
 // TODO: Introduce isAtomic, openF, closeF?
 // TODO: Block children atm == inlines, but what about a block having other children that are blocks?
@@ -6,7 +7,7 @@
 import React from "react";
 import ReactDOM from "react-dom";
 import "./index.css";
-var _ = require("lodash");
+import { filter, first, last } from "lodash-es";
 
 // Some text to play with
 // TODO: We can't really deal with empty text nodes yet
@@ -120,7 +121,7 @@ function deserialize(text) {
     }
     return null;
   });
-  return { node: firstLeaf(root), char: 0 };
+  return { node: first(leaves(root)), char: 0 };
 }
 
 // ----------------------------------------------------------------------------
@@ -148,41 +149,27 @@ function descendants(node) {
 }
 
 function top(node) {
-  const a = ancestors(node);
-  return a[a.length - 1];
+  return last(ancestors(node));
 }
 
 function leaves(node) {
-  return descendants(node).filter((n) => !n.children.length);
-}
-
-function firstLeaf(node) {
-  return leaves(node)[0] ?? node;
-}
-
-function lastLeaf(node) {
-  const l = leaves(node);
-  return l[l.length - 1] ?? node;
+  return filter(descendants(node), (n) => !n.children.length);
 }
 
 function leftLeaf(node) {
-  if (node.prev) {
-    return lastLeaf(node.prev);
-  } else if (node.parent) {
-    return leftLeaf(node.parent);
-  } else {
-    return null;
-  }
+  return node.prev
+    ? last(leaves(node.prev))
+    : node.parent
+    ? leftLeaf(node.parent)
+    : null;
 }
 
 function rightLeaf(node) {
-  if (node.next) {
-    return firstLeaf(node.next);
-  } else if (node.parent) {
-    return rightLeaf(node.parent);
-  } else {
-    return null;
-  }
+  return node.next
+    ? first(leaves(node.next))
+    : node.parent
+    ? rightLeaf(node.parent)
+    : null;
 }
 
 function remove(node) {
@@ -256,6 +243,10 @@ function concatNodes(m, n) {
 // Tree/text cursor
 // ----------------------------------------------------------------------------
 
+/**
+ * Position of each node (depth-first) given its text, starting at pos in node.
+ */
+// TODO: This is a bit dodge... E.g. handles block refs in not an amazing way.
 function positions(node, pos = 0) {
   let result = [];
   (function recurse(n, p) {
@@ -359,6 +350,9 @@ function positions(node, pos = 0) {
 //   }
 // }
 
+/**
+ * Project cursor onto its ancestors.
+ */
 function projections(cursor) {
   let result = [];
   do {
@@ -412,168 +406,96 @@ function downChar(cursor) {
   }
 }
 
+// TODO: Need offset?
+function start(node) {
+  return { node: node, char: 0 };
+}
+
+// TODO: Need offset?
+function end(node) {
+  return { node: node, char: node.rendered.length };
+}
+
+// TODO: Should this rather use projections?
 function leftChar(cursor) {
-  if (atNodeStart(cursor)) {
-    const node = cursor.node;
-    const prev = leftLeaf(node);
-    if (prev) {
-      if (prev.parent !== node.parent) {
-        // TODO: Must be a better way to handle this discrepency with text nodes...
-        return { ...cursor, node: prev, char: prev.rendered.length };
-      } else if (prev.type === "text") {
-        return { ...cursor, node: prev, char: prev.rendered.length - 1 };
-      } else if (prev.type === "ref") {
-        // TODO: What if there isn't a leftLeaf(prev)?
-        const prevPrev = leftLeaf(prev);
-        return { ...cursor, node: prevPrev, char: prevPrev.rendered.length };
-      } else {
-        throw new Error("Unknown node type: " + prev.type);
+  const l = leftLeaf(cursor.node);
+
+  for (const c of projections(cursor).reverse()) {
+    if (atNodeStart(c)) {
+      if (c.node.type === "root") return cursor;
+      if (c.node.type === "block") return end(l);
+      if (l.type === "text") {
+        // TODO: Need offset?
+        // const result = end(l);
+        // result.char--;
+        // return result;
+        return end(l);
       }
-    } else {
-      // At the beginning of the first node, do nothing.
-      return cursor;
+      // Skip over refs.
+      if (l.type === "ref") return end(leftLeaf(l));
     }
-  } else {
-    return { ...cursor, char: cursor.char - 1 };
   }
+
+  return { ...cursor, char: cursor.char - 1 };
 }
 
 function rightChar(cursor) {
-  if (atNodeEnd(cursor)) {
-    const node = cursor.node;
-    const next = rightLeaf(node);
-    if (next) {
-      if (next.parent !== node.parent) {
-        // TODO: Must be a better way to handle this discrepency...
-        return { ...cursor, node: next, char: 0 };
-      } else if (next.type === "text") {
-        return { ...cursor, node: next, char: 1 };
-      } else if (next.type === "ref") {
-        // TODO: What if there isn't a rightLeaf(next)?
-        return { ...cursor, node: rightLeaf(next), char: 0 };
-      } else {
-        throw new Error("Unknown node type: " + node.type);
+  const r = rightLeaf(cursor.node);
+
+  for (const c of projections(cursor).reverse()) {
+    if (atNodeEnd(c)) {
+      if (c.node.type === "root") return cursor;
+      if (c.node.type === "block") return start(r);
+      if (r.type === "text") {
+        // TODO: Need offset?
+        // const result = end(r);
+        // result.char++;
+        // return result;
+        return start(r);
       }
-    } else {
-      // At the end of the last node, do nothing.
-      return cursor;
+      // Skip over refs.
+      if (r.type === "ref") return start(rightLeaf(r));
     }
-  } else {
-    return { ...cursor, char: cursor.char + 1 };
   }
+
+  return { ...cursor, char: cursor.char + 1 };
 }
 
 function insertChar(cursor, chr) {
-  // TODO: Avoid mutation
-  const node = cursor.node;
-  if (node.type === "text") {
-    node.text =
-      node.text.slice(0, cursor.char) + chr + node.text.slice(cursor.char);
-    cursor.char++;
+  for (const c of projections(cursor).reverse()) {
+    if (c.node.type === "text") {
+      // TODO: Avoid mutation
+      c.node.text =
+        c.node.text.slice(0, c.char) + chr + c.node.text.slice(c.char);
+      return { ...cursor, char: cursor.char + 1 };
+    }
   }
+  return cursor;
 }
 
 function deleteChar(cursor) {
-  // Eldest responds first
-  let done = false;
-  for (cursor of projections(cursor).reverse()) {
-    if (done) {
-      break;
-    }
-    const node = cursor.node;
-
-    if (node.type === "root") {
-      if (atNodeEnd(cursor)) {
+  for (const c of projections(cursor).reverse()) {
+    if (atNodeEnd(c)) {
+      if (c.node.type === "root") {
         console.log("End of doc");
+        return cursor;
       }
-    } else if (node.type === "block") {
-      if (atNodeEnd(cursor)) {
-        if (node.next) {
-          // joinNodes(node);
-          done = true;
-        }
+      if (c.node.type === "block") {
+        // NEXT
+        // joinNodes(c.node);
+        return cursor;
       }
-    } else if (node.type === "text") {
-      if (!atNodeEnd(cursor)) {
-        // TODO: Avoid mutation
-        node.text =
-          node.text.slice(0, cursor.char) + node.text.slice(cursor.char + 1);
-        done = true;
-      }
-      // TODO: What to do at text end?
+    }
+
+    if (c.node.type === "text") {
+      // TODO: Avoid mutation
+      c.node.text =
+        c.node.text.slice(0, c.char) + c.node.text.slice(c.char + 1);
+      return cursor;
     }
   }
+  return cursor;
 }
-
-// function backspaceChar(cursor) {
-//   // TODO: This is just leftChar -> deleteChar?
-//   const node = cursor.node;
-//   // TODO: Block management could exist outside of the interface layer completely...
-//   if (node.type === "text") {
-//     if (atNodeStart(cursor)) {
-//       // TODO: Avoid mutation
-//       node.text = node.text.slice(0, cursor.char - 1) + node.text.slice(cursor.char);
-//       cursor.char--;
-//       // At the beginning of a node
-//       if (node.prev && node.prev.parent !== node.parent) {
-//         // Backspaced from beginning of a block
-
-//         // Delete the block and update all the pointers
-//         const block = node.parent;
-//         const blocks = this.state.blocks;
-//         // TODO: Updating the pointers is really a shit show maintaining all of this stuff...
-//         //       Probably need a tree abstraction somewhere...
-//         console.log(block);
-//         let newBlock = {
-//           ...block.prev,
-//           children: block.prev.children.concat(block.children),
-//           next: block.next,
-//         };
-//         // TODO: How to make this immutable?
-//         newBlock.children = newBlock.children.map(n => ({...n, parent: newBlock}));
-
-//         // Update nodes list
-//         // NOTE: Have to update *all* of this block's nodes because they were recreated above
-//         const newNodes1 = newBlock.children;
-//         const nodeIndex = nodes.findIndex(n => (n === node));
-//         const newNodes = nodes.slice(0, nodeIndex).concat(newNodes1, nodes.slice(nodeIndex + newNodes1.length));
-//         // console.log(nodes);
-//         // console.log(nodeIndex);
-//         // console.log(newNodes1);
-//         // console.log(newNodes);
-//         // Update cursor
-//         // cursor.node = newNode;
-//         // console.log(newNode);
-
-//         // TODO: Really need a better way to do this.
-//         const blockIndex = blocks.findIndex(b => b === block);
-//         const newBlocks = (
-//           blocks.slice(0, blockIndex - 1)
-//           .concat(
-//             newBlock,
-//             {
-//               ...block.next,
-//               prev: block,
-//             },
-//             blocks.slice(blockIndex + 2),
-//           )
-//         );
-//         // TODO: We just deleted a block... How do we update all refs of it?
-//         // TODO: Don't mutate like this. At least move to end of function
-
-//         this.setState({ blocks: newBlocks, nodes: newNodes });
-
-//         console.log(newBlocks);
-//       } else {
-//         // Backspaced at the beginning of a node, but not beginning of a block
-//         if (node.prev.type === "text") {
-//           // TODO: Join text nodes?
-//         }
-//       }
-//     } else {
-//     }
-//   }
-// }
 
 function updateNodeRendered(node, withDelim = true) {
   let rendered = "";
@@ -609,7 +531,7 @@ function updateNodeStart(node) {
 
 function renderText(node, cursor) {
   const text = node.rendered;
-  const textCursor = _.last(projections(cursor)).char;
+  const textCursor = last(projections(cursor)).char;
   return [
     [
       text.slice(0, textCursor),
@@ -654,6 +576,7 @@ class App extends React.Component {
 
     // TODO: Any way to avoid having to do this here as well?
     updateNodeRendered(top(cursor.node));
+    updateNodeStart(top(cursor.node));
 
     this.handleKeyDown = this.handleKeyDown.bind(this);
   }
@@ -671,12 +594,14 @@ class App extends React.Component {
     } else if (key === "ArrowRight") {
       cursor = rightChar(cursor);
     } else if (key === "Backspace") {
+      // TODO: This won't play nice with how leftChar currently skips refs.
+      const prev = cursor;
       cursor = leftChar(cursor);
-      deleteChar(cursor);
+      if (cursor !== prev) cursor = deleteChar(cursor);
     } else if (key === "Delete") {
-      deleteChar(cursor);
+      cursor = deleteChar(cursor);
     } else if (key.length === 1) {
-      insertChar(cursor, key);
+      cursor = insertChar(cursor, key);
     } else {
       console.log(key);
     }
