@@ -1,9 +1,12 @@
+// TODO: Fixes to atNode{Start,End} broke something else
 // TODO: Introduce isAtomic, openF, closeF?
 // TODO: Block children atm == inlines, but what about a block having other children that are blocks?
 //       i.e. outlining...
+// TODO: Clean up text vs value vs rendered...
 import React from "react";
 import ReactDOM from "react-dom";
 import "./index.css";
+var _ = require("lodash");
 
 // Some text to play with
 // TODO: We can't really deal with empty text nodes yet
@@ -30,10 +33,10 @@ function deserialize(text) {
       type: "block",
       id: LAST_BLOCK_ID + i,
       start: start,
-      text: blockTexts[i],
       prev: prev,
       parent: root,
       rightDelim: "\n",
+      text: blockTexts[i],
     };
     blocks.push(block);
     LAST_BLOCK_ID += 1;
@@ -50,6 +53,7 @@ function deserialize(text) {
   const startToBlock = {};
   blocks.map((block) => {
     startToBlock[block.start] = block;
+    delete block.start;
     return null;
   });
 
@@ -73,13 +77,11 @@ function deserialize(text) {
         type: "text",
         text: plainText[0],
         value: plainText[0],
-        start: 0,
         parent: block,
         children: [],
       };
       const second = {
         type: "ref",
-        text: match[0],
         value: refBlock,
         start: first.start + first.text.length,
         parent: block,
@@ -91,7 +93,6 @@ function deserialize(text) {
         type: "text",
         text: plainText[1],
         value: plainText[1],
-        start: second.start + second.text.length,
         parent: block,
         children: [],
       };
@@ -101,13 +102,13 @@ function deserialize(text) {
         type: "text",
         text: block.text,
         value: block.text,
-        start: 0,
         parent: block,
         children: [],
       });
     }
     nodes = nodes.concat(children);
     block.children = children;
+    delete block.text;
   }
 
   blocks.map((block) => {
@@ -122,103 +123,264 @@ function deserialize(text) {
   return { node: firstLeaf(root), char: 0 };
 }
 
-function firstDescendant(node) {
-  return node.children.length === 0 ? node : firstDescendant(node.children[0]);
-}
+// ----------------------------------------------------------------------------
+// Tree
+// ----------------------------------------------------------------------------
 
-function lastDescendant(node) {
-  return node.children.length === 0
-    ? node
-    : lastDescendant(node.children[node.children.length - 1]);
-}
-
-function moveLeaf(node, direction) {
-  const getDescendant = direction === "prev" ? lastDescendant : firstDescendant;
-
-  // try prev/next
-  if (node[direction]) {
-    return getDescendant(node[direction]);
-  } else {
-    // try up
-    if (node.parent) {
-      // try prev/next
-      if (node.parent[direction]) {
-        return getDescendant(node.parent[direction]);
-      } else {
-        // `node`'s parent is first/last sibling
-        return null;
-      }
-    } else {
-      // `node` is first/last sibling and root
-      return null;
-    }
-  }
-}
-
-function* iterAncestors(node) {
+function ancestors(node) {
+  let result = [];
   do {
-    yield node;
+    result.push(node);
     node = node.parent;
-  } while (node)
+  } while (node);
+  return result;
 }
 
-function getRoot(node) {
-  while (node.parent) {
-    node = node.parent;
-  }
-  return node;
+function descendants(node) {
+  let result = [];
+  (function recurse(n) {
+    result.push(n);
+    for (const c of n.children) {
+      recurse(c);
+    }
+  })(node);
+  return result;
 }
 
-function getPreviousLeaf(node) {
-  if (node.children.length > 0) {
-    throw new Error("Called getPreviousLeaf on a non-leaf node");
-  }
-  return moveLeaf(node, "prev");
+function top(node) {
+  const a = ancestors(node);
+  return a[a.length - 1];
 }
 
-function getNextLeaf(node) {
-  if (node.children.length > 0) {
-    throw new Error("Called getNextLeaf on a non-leaf node");
-  }
-  return moveLeaf(node, "next");
+function leaves(node) {
+  return descendants(node).filter((n) => !n.children.length);
 }
 
 function firstLeaf(node) {
-  if (node.children.length === 0) {
-    return node;
-  }
-  return firstLeaf(node.children[0]);
+  return leaves(node)[0] ?? node;
 }
 
-// TODO: Can we reuse logic between this and updateNodeRendered
-function* iterNodeStarts(node, start = 0) {
-  yield [node, start];
-  start += (node.leftDelim ?? "").length;
-  if (node.children.length > 0) {
-    for (const n of node.children) {
-      start = yield* iterNodeStarts(n, start);
-    }
+function lastLeaf(node) {
+  const l = leaves(node);
+  return l[l.length - 1] ?? node;
+}
+
+function leftLeaf(node) {
+  if (node.prev) {
+    return lastLeaf(node.prev);
+  } else if (node.parent) {
+    return leftLeaf(node.parent);
   } else {
-    start += node.text.length;
+    return null;
   }
-  start += (node.rightDelim ?? "").length;
-  return start;
 }
 
-function getTextCursor(cursor) {
-  return (
-    [...iterNodeStarts(getRoot(cursor.node))].find(
-      ([node]) => node === cursor.node
-    )[1] + cursor.char
-  );
+function rightLeaf(node) {
+  if (node.next) {
+    return firstLeaf(node.next);
+  } else if (node.parent) {
+    return rightLeaf(node.parent);
+  } else {
+    return null;
+  }
+}
+
+function remove(node) {
+  // TODO: Avoid mutation, pretty hard with pointers
+  if (node.parent)
+    node.parent.children.splice(node.parent.children.indexOf(node), 1);
+  if (node.prev) node.prev.next = node.next;
+  if (node.next) node.next.prev = node.prev;
+}
+
+function insertNodesAfter(point, ...nodes) {
+  // TODO: Avoid mutation
+  if (nodes.length) {
+    if (point.next) point.next.prev = nodes[nodes.length - 1];
+    point.next = nodes[0];
+
+    if (point.parent) {
+      const index = point.parent.indexOf(point);
+      point.parent.children.splice(index, 0, ...nodes);
+    }
+  }
+}
+
+function insertChildren(point, ...nodes) {
+  if (nodes.length) {
+    if (point.children.length) {
+      insertNodesAfter(point.children[point.children.length - 1], nodes);
+    } else {
+      point.children = nodes;
+      for (const child of nodes) {
+        child.parent = point;
+      }
+    }
+  }
+}
+
+function concatNodes(m, n) {
+  if (m.type === "block" && n.type === "block") {
+    for (const child of n.children) {
+      child.parent = m;
+    }
+
+    const left = m.children[m.children.length - 1];
+    const right = n.children[0];
+    const conc = concatNodes(left, right);
+
+    if (conc) {
+      if (m.prev) m.prev.next = conc;
+      if (n.next) n.next.prev = conc;
+      m.children = m.children
+        .slice(0, m.children.length - 1)
+        .concat(conc)
+        .concat(n.children.slice(1));
+    } else {
+      m.prev = left;
+      n.next = right;
+      m.children = m.children.concat(n.children);
+    }
+  } else if (m.type === "text" && n.type === "text") {
+    return {
+      ...m,
+      text: m.text + n.text,
+      value: m.text + n.text,
+    };
+  }
+
+  return null;
+}
+
+// ----------------------------------------------------------------------------
+// Tree/text cursor
+// ----------------------------------------------------------------------------
+
+function positions(node, pos = 0) {
+  let result = [];
+  (function recurse(n, p) {
+    result.push([n, p]);
+    p += n.leftDelim?.length ?? 0;
+    for (const c of n.children) p = recurse(c, p);
+    if (n.text?.length) p += n.text.length;
+    p += n.rightDelim?.length ?? 0;
+    return p;
+  })(node, pos);
+  return result;
+}
+
+// function joinNodes(node) {
+//   const [m, n] = [node, node.next];
+
+//   // If next exists, and has the same type
+//   if (n && (m.type === n.type)) {
+
+//     if (m.children.length) {
+//       insertNodesAfter(m.children[m.children.length - 1], n.children);
+//       remove(n);
+//     }
+
+//     // TODO: Extract to simple tree/cursor module -------------------
+//     const mLast = m.children[m.children.length - 1];
+//     const nFirst = n.children[0];
+//     if (mLast && nFirst) {
+//       const joined = joinNode(left);
+//       if (joined) {
+//         remove(n);
+//         if (m.prev)
+//           m.prev.next = joined;
+//         if (n.next)
+//           n.next.prev = joined;
+//         children = (
+//           m.children.slice(0, m.children.length - 1).concat(joined).concat(n.children.slice(1))
+//         );
+//       } else {
+//         m.prev = left;
+//         n.next = right;
+//         children = m.children.concat(n.children);
+//       }
+//     }
+
+//     // --------------------------------------------------------------
+
+//     // If they're both text nodes, also merge text
+//     if (m.type === "text") {
+//       m.text = m.text + n.text;
+//       m.value = m.text;
+//     }
+
+//     return m;
+//   }
+
+//   return null;
+
+// }
+
+// function joinNodes(node) {
+//   // TODO: node.next needs to become more complex when we handle nested blocks
+//   const [m, n] = [node, node.next];
+//   // TODO: Avoid mutation
+//   if (n) {
+
+//     if (n.children.length) {
+//       for (const child of n.children) {
+//         child.parent = m;
+//       }
+
+//       const left = m.children[m.children.length - 1];
+//       const right = n.children[0];
+//       const conc = concatNodes(left, right);
+//     }
+
+//     if (m.type === "block" && n.type === "block") {
+
+//       if (conc) {
+//         if (m.prev)
+//           m.prev.next = conc;
+//         if (n.next)
+//           n.next.prev = conc;
+//         m.children = (
+//           m.children.slice(0, m.children.length - 1).concat(conc).concat(n.children.slice(1))
+//         );
+//       } else {
+//         m.prev = left;
+//         n.next = right;
+//         m.children = m.children.concat(n.children);
+//       }
+//     } else if (m.type === "text" && n.type === "text") {
+//       return {
+//         ...m,
+//         text: m.text + n.text,
+//         value: m.text + n.text,
+//       }
+//     }
+//     concatNodes(node, node.next);
+//     remove(node.next);
+//   }
+// }
+
+function projections(cursor) {
+  let result = [];
+  do {
+    result.push(cursor);
+    cursor = {
+      node: cursor.node.parent,
+      char: cursor.node.start + cursor.char - (cursor.node.parent?.start ?? 0),
+    };
+  } while (cursor.node);
+  return result;
 }
 
 function atNodeEnd(cursor) {
-  return cursor.char < cursor.node.text.length;
+  if (cursor.node.type === "text") {
+    return cursor.char === cursor.node.rendered.length;
+  } else {
+    return cursor.char === cursor.node.rendered.length - 1;
+  }
 }
 
 function atNodeStart(cursor) {
-  return cursor.char > 0;
+  return cursor.char === 0;
 }
 
 // TODO: In reality, up and down would need to move along virtual lines
@@ -252,10 +414,8 @@ function downChar(cursor) {
 
 function leftChar(cursor) {
   if (atNodeStart(cursor)) {
-    return { ...cursor, char: cursor.char - 1 };
-  } else {
     const node = cursor.node;
-    const prev = getPreviousLeaf(node);
+    const prev = leftLeaf(node);
     if (prev) {
       if (prev.parent !== node.parent) {
         // TODO: Must be a better way to handle this discrepency with text nodes...
@@ -263,8 +423,8 @@ function leftChar(cursor) {
       } else if (prev.type === "text") {
         return { ...cursor, node: prev, char: prev.rendered.length - 1 };
       } else if (prev.type === "ref") {
-        // TODO: What if there isn't a getPreviousLeaf(prev)?
-        const prevPrev = getPreviousLeaf(prev);
+        // TODO: What if there isn't a leftLeaf(prev)?
+        const prevPrev = leftLeaf(prev);
         return { ...cursor, node: prevPrev, char: prevPrev.rendered.length };
       } else {
         throw new Error("Unknown node type: " + prev.type);
@@ -273,15 +433,15 @@ function leftChar(cursor) {
       // At the beginning of the first node, do nothing.
       return cursor;
     }
+  } else {
+    return { ...cursor, char: cursor.char - 1 };
   }
 }
 
 function rightChar(cursor) {
   if (atNodeEnd(cursor)) {
-    return { ...cursor, char: cursor.char + 1 };
-  } else {
     const node = cursor.node;
-    const next = getNextLeaf(node);
+    const next = rightLeaf(node);
     if (next) {
       if (next.parent !== node.parent) {
         // TODO: Must be a better way to handle this discrepency...
@@ -289,8 +449,8 @@ function rightChar(cursor) {
       } else if (next.type === "text") {
         return { ...cursor, node: next, char: 1 };
       } else if (next.type === "ref") {
-        // TODO: What if there isn't a getNextLeaf(next)?
-        return { ...cursor, node: getNextLeaf(next), char: 0 };
+        // TODO: What if there isn't a rightLeaf(next)?
+        return { ...cursor, node: rightLeaf(next), char: 0 };
       } else {
         throw new Error("Unknown node type: " + node.type);
       }
@@ -298,6 +458,8 @@ function rightChar(cursor) {
       // At the end of the last node, do nothing.
       return cursor;
     }
+  } else {
+    return { ...cursor, char: cursor.char + 1 };
   }
 }
 
@@ -312,42 +474,35 @@ function insertChar(cursor, chr) {
 }
 
 function deleteChar(cursor) {
-  const node = cursor.node;
-  if (node.type === "text") {
-    if (atNodeEnd(cursor)) {
-      // TODO: Avoid mutation
-      node.text =
-        node.text.slice(0, cursor.char) + node.text.slice(cursor.char + 1);
-    } else {
-      // End of block
-      // TODO: Find youngest parent that is a block?
-      // TODO: If it has a `next` and that's a block, joinBlocks
-      //       Delete the block, join children, update all the pointers
-      // TODO: Probably an efficient way to do this from root based on cursor position and intervals...
-      const ancestors = [...iterAncestors(cursor.node)].reverse();
-      for (const parent of ancestors) {
-        console.log(parent);
-        // TODO: How do we figure out whether we're at the end of another node?
-        //       Basically, how do we translate the cursor from one node's co-ordinate system to one
-        //       if its ancestors?
-        //       At this point, might be simpler to start with textCursor and kinda binary search
-        //       down the tree to the node(s) we care about...
-        //       But let's not do that for now... Let's translateCursor(cursor, node)
-        if (node.type === "block") {
+  // Eldest responds first
+  let done = false;
+  for (cursor of projections(cursor).reverse()) {
+    if (done) {
+      break;
+    }
+    const node = cursor.node;
+
+    if (node.type === "root") {
+      if (atNodeEnd(cursor)) {
+        console.log("End of doc");
+      }
+    } else if (node.type === "block") {
+      if (atNodeEnd(cursor)) {
+        if (node.next) {
+          // joinNodes(node);
+          done = true;
         }
       }
-      const nextParent = node.parent.next;
-      if (nextParent) {
-        console.log("Deleting into a block");
-      } else {
-        console.log("End of file");
-        // End of file?
+    } else if (node.type === "text") {
+      if (!atNodeEnd(cursor)) {
+        // TODO: Avoid mutation
+        node.text =
+          node.text.slice(0, cursor.char) + node.text.slice(cursor.char + 1);
+        done = true;
       }
+      // TODO: What to do at text end?
     }
   }
-  return cursor;
-  // - end of node
-  // - end of doc
 }
 
 // function backspaceChar(cursor) {
@@ -359,7 +514,6 @@ function deleteChar(cursor) {
 //       // TODO: Avoid mutation
 //       node.text = node.text.slice(0, cursor.char - 1) + node.text.slice(cursor.char);
 //       cursor.char--;
-//     } else {
 //       // At the beginning of a node
 //       if (node.prev && node.prev.parent !== node.parent) {
 //         // Backspaced from beginning of a block
@@ -416,6 +570,7 @@ function deleteChar(cursor) {
 //           // TODO: Join text nodes?
 //         }
 //       }
+//     } else {
 //     }
 //   }
 // }
@@ -425,7 +580,7 @@ function updateNodeRendered(node, withDelim = true) {
   if (withDelim) {
     rendered += node.leftDelim ?? "";
   }
-  if (node.children.length > 0) {
+  if (node.children.length) {
     rendered += node.children
       .map((n) => updateNodeRendered(n))
       .reduce((a, b) => a + b, "");
@@ -447,14 +602,14 @@ function updateNodeRendered(node, withDelim = true) {
 }
 
 function updateNodeStart(node) {
-  for (const [n, s] of iterNodeStarts(node)) {
+  for (const [n, s] of positions(node)) {
     n.start = s;
   }
 }
 
 function renderText(node, cursor) {
   const text = node.rendered;
-  const textCursor = getTextCursor(cursor);
+  const textCursor = _.last(projections(cursor)).char;
   return [
     [
       text.slice(0, textCursor),
@@ -469,7 +624,7 @@ function renderText(node, cursor) {
 
 function renderStructElements(node) {
   let renderedChildren = [];
-  if (node.children.length > 0) {
+  if (node.children.length) {
     renderedChildren = node.children.map(renderStructElements);
   }
   if (node.type === "root" || node.type === "block") {
@@ -498,7 +653,7 @@ class App extends React.Component {
     };
 
     // TODO: Any way to avoid having to do this here as well?
-    updateNodeRendered(getRoot(cursor.node));
+    updateNodeRendered(top(cursor.node));
 
     this.handleKeyDown = this.handleKeyDown.bind(this);
   }
@@ -515,10 +670,11 @@ class App extends React.Component {
       cursor = leftChar(cursor);
     } else if (key === "ArrowRight") {
       cursor = rightChar(cursor);
-      // } else if (key === "Backspace") {
-      //   cursor = backspaceChar(cursor);
+    } else if (key === "Backspace") {
+      cursor = leftChar(cursor);
+      deleteChar(cursor);
     } else if (key === "Delete") {
-      cursor = deleteChar(cursor);
+      deleteChar(cursor);
     } else if (key.length === 1) {
       insertChar(cursor, key);
     } else {
@@ -526,7 +682,7 @@ class App extends React.Component {
     }
 
     // Update nodes given changes
-    const root = getRoot(cursor.node);
+    const root = top(cursor.node);
     updateNodeRendered(root);
     updateNodeStart(root);
 
@@ -535,7 +691,7 @@ class App extends React.Component {
 
   render() {
     const cursor = this.state.cursor;
-    const root = getRoot(cursor.node);
+    const root = top(cursor.node);
     const [text, textCursor] = renderText(root, cursor);
     const struct = renderStructElements(root);
     return (
