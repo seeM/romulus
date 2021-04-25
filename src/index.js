@@ -4,10 +4,11 @@
 // TODO: Block children atm == inlines, but what about a block having other children that are blocks?
 //       i.e. outlining...
 // TODO: Clean up text vs value vs rendered...
+// TODO: Refactor to immutable tree cursor
 import React from "react";
 import ReactDOM from "react-dom";
 import "./index.css";
-import { filter, first, last } from "lodash-es";
+import { filter, first, last, map } from "lodash-es";
 
 // Some text to play with
 // TODO: We can't really deal with empty text nodes yet
@@ -19,7 +20,7 @@ let LAST_BLOCK_ID = 0;
 
 // TODO: Clean this shit up
 function deserialize(text) {
-  const root = { type: "root", start: 0 };
+  const r = { type: "root", start: 0 };
 
   // Parse blocks
   let blocks = [];
@@ -35,7 +36,7 @@ function deserialize(text) {
       id: LAST_BLOCK_ID + i,
       start: start,
       prev: prev,
-      parent: root,
+      parent: r,
       rightDelim: "\n",
       text: blockTexts[i],
     };
@@ -44,7 +45,7 @@ function deserialize(text) {
     prev = block;
   }
 
-  root.children = blocks;
+  r.children = blocks;
 
   // For convenience, each block knows its next block.
   for (let i = 0; i < blocks.length; i++) {
@@ -121,7 +122,7 @@ function deserialize(text) {
     }
     return null;
   });
-  return { node: first(leaves(root)), char: 0 };
+  return { node: first(leaves(r)), char: 0 };
 }
 
 // ----------------------------------------------------------------------------
@@ -141,15 +142,21 @@ function descendants(node) {
   let result = [];
   (function recurse(n) {
     result.push(n);
-    for (const c of n.children) {
-      recurse(c);
-    }
+    for (const c of n.children) recurse(c);
   })(node);
   return result;
 }
 
-function top(node) {
+function root(node) {
   return last(ancestors(node));
+}
+
+function leftmost(node) {
+  return first(node.parents.children);
+}
+
+function rightmost(node) {
+  return last(node.parents.children);
 }
 
 function leaves(node) {
@@ -172,71 +179,62 @@ function rightLeaf(node) {
     : null;
 }
 
-function remove(node) {
-  // TODO: Avoid mutation, pretty hard with pointers
-  if (node.parent)
-    node.parent.children.splice(node.parent.children.indexOf(node), 1);
-  if (node.prev) node.prev.next = node.next;
-  if (node.next) node.next.prev = node.prev;
+function remove(loc) {
+  if (loc.parent)
+    loc.parent.children.splice(loc.parent.children.indexOf(loc), 1);
+  if (loc.prev) loc.prev.next = loc.next;
+  if (loc.next) loc.next.prev = loc.prev;
 }
 
-function insertNodesAfter(point, ...nodes) {
-  // TODO: Avoid mutation
-  if (nodes.length) {
-    if (point.next) point.next.prev = nodes[nodes.length - 1];
-    point.next = nodes[0];
-
-    if (point.parent) {
-      const index = point.parent.indexOf(point);
-      point.parent.children.splice(index, 0, ...nodes);
-    }
-  }
+function _insertChildAt(loc, index, node) {
+  node.parent = loc;
+  loc.children.splice(index, 0, node);
 }
 
-function insertChildren(point, ...nodes) {
-  if (nodes.length) {
-    if (point.children.length) {
-      insertNodesAfter(point.children[point.children.length - 1], nodes);
-    } else {
-      point.children = nodes;
-      for (const child of nodes) {
-        child.parent = point;
-      }
-    }
-  }
+function insertLeft(loc, node) {
+  if (loc.prev) loc.prev.next = node;
+  loc.prev = node;
+  if (loc.parent)
+    _insertChildAt(
+      loc.parent,
+      Math.max(0, loc.parent.children.indexOf(loc) - 1),
+      node
+    );
 }
 
-function concatNodes(m, n) {
-  if (m.type === "block" && n.type === "block") {
-    for (const child of n.children) {
-      child.parent = m;
-    }
+function insertRight(loc, node) {
+  node.prev = loc;
+  node.next = loc.next;
+  if (loc.next) loc.next.prev = node;
+  loc.next = node;
+  if (loc.parent)
+    _insertChildAt(loc.parent, loc.parent.children.indexOf(loc), node);
+}
 
-    const left = m.children[m.children.length - 1];
-    const right = n.children[0];
-    const conc = concatNodes(left, right);
+function insertChild(loc, node) {
+  if (loc.children.length) insertLeft(first(loc.children), node);
+  else _insertChildAt(loc, 0, node);
+}
 
-    if (conc) {
-      if (m.prev) m.prev.next = conc;
-      if (n.next) n.next.prev = conc;
-      m.children = m.children
-        .slice(0, m.children.length - 1)
-        .concat(conc)
-        .concat(n.children.slice(1));
-    } else {
-      m.prev = left;
-      n.next = right;
-      m.children = m.children.concat(n.children);
+function appendChild(loc, node) {
+  if (loc.children.length) insertRight(last(loc.children), node);
+  else _insertChildAt(loc, 0, node);
+}
+
+function joinRight(loc) {
+  if (loc.next && loc.type === loc.next.type) {
+    if (loc.next.children.length) {
+      // TODO: Don't like that this is before appendChilds
+      const left = last(loc.children);
+      map(loc.next.children, (c) => appendChild(loc, c));
+      // Try to join rightmost child of loc with leftmost child of loc.next
+      // e.g. to join two text nodes
+      // TODO: Perhaps this should be dealt with in its own postprocessing step
+      if (left) joinRight(left);
     }
-  } else if (m.type === "text" && n.type === "text") {
-    return {
-      ...m,
-      text: m.text + n.text,
-      value: m.text + n.text,
-    };
+    if (loc.type === "text") loc.value = loc.text = loc.text + loc.next.text;
+    remove(loc.next);
   }
-
-  return null;
 }
 
 // ----------------------------------------------------------------------------
@@ -259,96 +257,6 @@ function positions(node, pos = 0) {
   })(node, pos);
   return result;
 }
-
-// function joinNodes(node) {
-//   const [m, n] = [node, node.next];
-
-//   // If next exists, and has the same type
-//   if (n && (m.type === n.type)) {
-
-//     if (m.children.length) {
-//       insertNodesAfter(m.children[m.children.length - 1], n.children);
-//       remove(n);
-//     }
-
-//     // TODO: Extract to simple tree/cursor module -------------------
-//     const mLast = m.children[m.children.length - 1];
-//     const nFirst = n.children[0];
-//     if (mLast && nFirst) {
-//       const joined = joinNode(left);
-//       if (joined) {
-//         remove(n);
-//         if (m.prev)
-//           m.prev.next = joined;
-//         if (n.next)
-//           n.next.prev = joined;
-//         children = (
-//           m.children.slice(0, m.children.length - 1).concat(joined).concat(n.children.slice(1))
-//         );
-//       } else {
-//         m.prev = left;
-//         n.next = right;
-//         children = m.children.concat(n.children);
-//       }
-//     }
-
-//     // --------------------------------------------------------------
-
-//     // If they're both text nodes, also merge text
-//     if (m.type === "text") {
-//       m.text = m.text + n.text;
-//       m.value = m.text;
-//     }
-
-//     return m;
-//   }
-
-//   return null;
-
-// }
-
-// function joinNodes(node) {
-//   // TODO: node.next needs to become more complex when we handle nested blocks
-//   const [m, n] = [node, node.next];
-//   // TODO: Avoid mutation
-//   if (n) {
-
-//     if (n.children.length) {
-//       for (const child of n.children) {
-//         child.parent = m;
-//       }
-
-//       const left = m.children[m.children.length - 1];
-//       const right = n.children[0];
-//       const conc = concatNodes(left, right);
-//     }
-
-//     if (m.type === "block" && n.type === "block") {
-
-//       if (conc) {
-//         if (m.prev)
-//           m.prev.next = conc;
-//         if (n.next)
-//           n.next.prev = conc;
-//         m.children = (
-//           m.children.slice(0, m.children.length - 1).concat(conc).concat(n.children.slice(1))
-//         );
-//       } else {
-//         m.prev = left;
-//         n.next = right;
-//         m.children = m.children.concat(n.children);
-//       }
-//     } else if (m.type === "text" && n.type === "text") {
-//       return {
-//         ...m,
-//         text: m.text + n.text,
-//         value: m.text + n.text,
-//       }
-//     }
-//     concatNodes(node, node.next);
-//     remove(node.next);
-//   }
-// }
 
 /**
  * Project cursor onto its ancestors.
@@ -481,8 +389,7 @@ function deleteChar(cursor) {
         return cursor;
       }
       if (c.node.type === "block") {
-        // NEXT
-        // joinNodes(c.node);
+        joinRight(c.node);
         return cursor;
       }
     }
@@ -575,8 +482,8 @@ class App extends React.Component {
     };
 
     // TODO: Any way to avoid having to do this here as well?
-    updateNodeRendered(top(cursor.node));
-    updateNodeStart(top(cursor.node));
+    updateNodeRendered(root(cursor.node));
+    updateNodeStart(root(cursor.node));
 
     this.handleKeyDown = this.handleKeyDown.bind(this);
   }
@@ -607,18 +514,18 @@ class App extends React.Component {
     }
 
     // Update nodes given changes
-    const root = top(cursor.node);
-    updateNodeRendered(root);
-    updateNodeStart(root);
+    const r = root(cursor.node);
+    updateNodeRendered(r);
+    updateNodeStart(r);
 
     this.setState({ cursor: cursor });
   }
 
   render() {
     const cursor = this.state.cursor;
-    const root = top(cursor.node);
-    const [text, textCursor] = renderText(root, cursor);
-    const struct = renderStructElements(root);
+    const r = root(cursor.node);
+    const [text, textCursor] = renderText(r, cursor);
+    const struct = renderStructElements(r);
     return (
       <div className="App">
         <div className="Text">{text}</div>
