@@ -1,5 +1,7 @@
+// TODO: Deleting a block should update its refs...
+// TODO: Can do proper up/down by going to position relative to second level highest node (block)
+//       and mantaining a char hint like with other editors.
 // TODO: Can I pull projection(...) one level above insertChar, deleteChar, etc?
-// TODO: Fixes to atNode{Start,End} broke something else
 // TODO: Introduce isAtomic, openF, closeF?
 // TODO: Block children atm == inlines, but what about a block having other children that are blocks?
 //       i.e. outlining...
@@ -18,9 +20,17 @@ const BLOCK_DELIM = "\n";
 const BLOCK_REF_PATTERN = /\(\((.*)\)\)/;
 let LAST_BLOCK_ID = 0;
 
+function Node(data) {
+  LAST_BLOCK_ID++;
+  return {
+    ...data,
+    id: LAST_BLOCK_ID,
+  };
+}
+
 // TODO: Clean this shit up
 function deserialize(text) {
-  const r = { type: "root", start: 0 };
+  const r = Node({ type: "root", start: 0 });
 
   // Parse blocks
   let blocks = [];
@@ -31,17 +41,15 @@ function deserialize(text) {
       i === 0
         ? 0
         : blocks[i - 1].start + blockTexts[i - 1].length + BLOCK_DELIM.length;
-    const block = {
+    const block = Node({
       type: "block",
-      id: LAST_BLOCK_ID + i,
       start: start,
       prev: prev,
       parent: r,
       rightDelim: "\n",
       text: blockTexts[i],
-    };
+    });
     blocks.push(block);
-    LAST_BLOCK_ID += 1;
     prev = block;
   }
 
@@ -75,14 +83,14 @@ function deserialize(text) {
       }
       const plainText = block.text.split(match[0]);
       // Node starts are relative to their containing block.
-      const first = {
+      const first = Node({
         type: "text",
         text: plainText[0],
         value: plainText[0],
         parent: block,
         children: [],
-      };
-      const second = {
+      });
+      const second = Node({
         type: "ref",
         value: refBlock,
         start: first.start + first.text.length,
@@ -90,23 +98,25 @@ function deserialize(text) {
         children: [],
         leftDelim: "((",
         rightDelim: "))",
-      };
-      const third = {
+      });
+      const third = Node({
         type: "text",
         text: plainText[1],
         value: plainText[1],
         parent: block,
         children: [],
-      };
+      });
       children = [first, second, third];
     } else {
-      children.push({
-        type: "text",
-        text: block.text,
-        value: block.text,
-        parent: block,
-        children: [],
-      });
+      children.push(
+        Node({
+          type: "text",
+          text: block.text,
+          value: block.text,
+          parent: block,
+          children: [],
+        })
+      );
     }
     nodes = nodes.concat(children);
     block.children = children;
@@ -182,8 +192,14 @@ function rightLeaf(node) {
 function remove(loc) {
   if (loc.parent)
     loc.parent.children.splice(loc.parent.children.indexOf(loc), 1);
-  if (loc.prev) loc.prev.next = loc.next;
-  if (loc.next) loc.next.prev = loc.prev;
+  if (loc.prev) {
+    loc.prev.next = loc.next;
+    loc.prev = null;
+  }
+  if (loc.next) {
+    loc.next.prev = loc.prev
+    loc.next = null;
+  };
 }
 
 function _insertChildAt(loc, index, node) {
@@ -192,48 +208,121 @@ function _insertChildAt(loc, index, node) {
 }
 
 function insertLeft(loc, node) {
-  if (loc.prev) loc.prev.next = node;
+  if (loc.type === node.type && loc.type === "text") {
+    loc.text = loc.value = node.text + loc.text;
+    return null;
+  }
+
+  // Link with left
+  if (loc.prev) {
+    node.prev = loc.prev;
+    loc.prev.next = node;
+  }
+  // Link with loc
   loc.prev = node;
+  node.next = loc;
+  // Link with parent
   if (loc.parent)
     _insertChildAt(
       loc.parent,
-      Math.max(0, loc.parent.children.indexOf(loc) - 1),
+      Math.max(0, loc.parent.children.indexOf(loc)),
       node
     );
 }
 
 function insertRight(loc, node) {
-  node.prev = loc;
-  node.next = loc.next;
-  if (loc.next) loc.next.prev = node;
+  // if (loc.type === node.type && loc.type === "text") {
+  //   loc.text = loc.value = loc.text + node.text;
+  //   return null;
+  // }
+
+  console.log("insertRight", loc, node);
+  // Link with right
+  if (loc.next) {
+    node.next = loc.next;
+    loc.next.prev = node;
+  };
+  // Link with loc
   loc.next = node;
+  node.prev = loc;
+  // Link with parent
   if (loc.parent)
-    _insertChildAt(loc.parent, loc.parent.children.indexOf(loc), node);
+    _insertChildAt(loc.parent, loc.parent.children.indexOf(loc) + 1, node);
 }
 
 function insertChild(loc, node) {
   if (loc.children.length) insertLeft(first(loc.children), node);
-  else _insertChildAt(loc, 0, node);
+  else {
+    loc.children = [node];
+    node.parent = loc;
+    node.prev = node.next = null;
+  }
 }
 
 function appendChild(loc, node) {
   if (loc.children.length) insertRight(last(loc.children), node);
-  else _insertChildAt(loc, 0, node);
+  else {
+    loc.children = [node];
+    node.parent = loc;
+    node.prev = node.next = null;
+  }
 }
 
 function joinRight(loc) {
+  console.log('join', loc.next.type, loc.next.children.slice());
   if (loc.next && loc.type === loc.next.type) {
     if (loc.next.children.length) {
-      // TODO: Don't like that this is before appendChilds
-      const left = last(loc.children);
-      map(loc.next.children, (c) => appendChild(loc, c));
+      // const _last = last(loc.children);
+      // TODO: Why does this affect children...
+      for (const c of loc.next.children.slice()) {
+        // console.log(c);
+        remove(c);
+        appendChild(loc, c);
+      }
       // Try to join rightmost child of loc with leftmost child of loc.next
       // e.g. to join two text nodes
-      // TODO: Perhaps this should be dealt with in its own postprocessing step
-      if (left) joinRight(left);
+      // TODO: Handle in insert node?
+      // if (_last) joinRight(_last);
     }
     if (loc.type === "text") loc.value = loc.text = loc.text + loc.next.text;
     remove(loc.next);
+  }
+}
+
+function splitRight(cursor) {
+  // TODO: Make recursive...
+  // Split at youngest ancestor that responds
+  for (const c of projections(cursor)) {
+    if (c.node.type === "block") {
+      // Split the current leaf
+      // TODO: Don't assume we're on the leaf?
+      // TODO: don't assume its text type...
+      const right = Node({
+        ...cursor.node,
+        text: cursor.node.text.slice(cursor.char),
+      });
+      // TODO: Avoid mutation; add replace method
+      cursor.node.text = cursor.node.text.slice(0, cursor.char);
+      cursor.node.value = cursor.node.text;
+      // insertRight(cursor.node, right);
+
+      const block = Node({
+        type: "block",
+        rightDelim: "\n",
+        children: [],
+      });
+      // Create a new block with trailing leaves and splitted right
+      // Remove trailing leaves from block 1
+      const i = c.node.children.indexOf(cursor.node);
+      // TODO: Super order dependent, hacky af
+      for (const x of [right].concat(c.node.children.slice(i + 1)).reverse()) {
+        remove(x);
+        insertChild(block, x);
+      }
+      insertRight(c.node, block);
+
+      return cursor;
+    }
   }
 }
 
@@ -244,6 +333,7 @@ function joinRight(loc) {
 /**
  * Position of each node (depth-first) given its text, starting at pos in node.
  */
+// TODO: This is the same as projections but for descendants
 // TODO: This is a bit dodge... E.g. handles block refs in not an amazing way.
 function positions(node, pos = 0) {
   let result = [];
@@ -404,6 +494,17 @@ function deleteChar(cursor) {
   return cursor;
 }
 
+function newline(cursor) {
+  cursor = splitRight(cursor);
+
+  // TODO: Can we avoid this?
+  updateNodeRendered(root(cursor.node));
+  updateNodeStart(root(cursor.node));
+
+  cursor = rightChar(cursor);
+  return cursor;
+}
+
 function updateNodeRendered(node, withDelim = true) {
   let rendered = "";
   if (withDelim) {
@@ -459,15 +560,24 @@ function renderStructElements(node) {
   if (node.type === "root" || node.type === "block") {
     return (
       <div className={"node-" + node.type}>
-        {"[" + node.type + "]"} {"start: " + node.start}
+        {"[" + node.type + "]"}
+        {" id: " + node.id}
+        {", start: " + node.start}
+        {", prev: " + node.prev?.id}
+        {", next: " + node.next?.id}
         {renderedChildren}
       </div>
     );
   } else {
     return (
       <div className={"node-" + node.type}>
-        {"[" + node.type + "]"} {"text: " + node.text}{" "}
-        {", value: " + node.value} {", start: " + node.start}
+        {"[" + node.type + "]"}
+        {" id: " + node.id}
+        {", start: " + node.start}
+        {", prev: " + node.prev?.id}
+        {", next: " + node.next?.id}
+        {", text: " + node.text}
+        {", value: " + node.value}
       </div>
     );
   }
@@ -486,6 +596,14 @@ class App extends React.Component {
     updateNodeStart(root(cursor.node));
 
     this.handleKeyDown = this.handleKeyDown.bind(this);
+  }
+
+  componentDidMount() {
+    window.addEventListener("keydown", this.handleKeyDown);
+  }
+
+  componentWillUnmount() {
+    window.removeEventListener("keydown", this.handleKeyDown);
   }
 
   handleKeyDown(event) {
@@ -507,6 +625,8 @@ class App extends React.Component {
       if (cursor !== prev) cursor = deleteChar(cursor);
     } else if (key === "Delete") {
       cursor = deleteChar(cursor);
+    } else if (key === "Enter") {
+      cursor = newline(cursor);
     } else if (key.length === 1) {
       cursor = insertChar(cursor, key);
     } else {
@@ -529,7 +649,7 @@ class App extends React.Component {
     return (
       <div className="App">
         <div className="Text">{text}</div>
-        <div className="Structure" onKeyDown={this.handleKeyDown} tabIndex="0">
+        <div className="Structure">
           <div>
             {"Text: " + textCursor}
             {"\nStruct: " +
