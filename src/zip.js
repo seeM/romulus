@@ -1,5 +1,3 @@
-// TODO: Check for bugs with if l/r missing .length
-// TODO: Check for bugs with concat() missing [ ] around node
 // TODO: Does it matter that right is a seq but left is a vector?
 const END = "__END__";
 
@@ -29,12 +27,10 @@ function path(loc) {
 }
 
 function lefts(loc) {
-  // TODO: Need to be a seq?
   return loc[1].l;
 }
 
 function rights(loc) {
-  // TODO: Need to be a seq?
   return loc[1].r;
 }
 
@@ -54,6 +50,7 @@ function down(loc) {
         },
       ];
   }
+  return null;
 }
 
 function up(loc) {
@@ -62,9 +59,13 @@ function up(loc) {
   if (pnodes) {
     const pnode = pnodes[pnodes.length - 1];
     return changed
-      ? [makeNode(pnode, l.concat([node], r)), ppath && { ...ppath, changed: true }]
+      ? [
+          makeNode(pnode, l.concat([node], r)),
+          ppath && { ...ppath, changed: true },
+        ]
       : [pnode, ppath];
   }
+  return null;
 }
 
 function isEnd(loc) {
@@ -81,10 +82,9 @@ function right(loc) {
   const [node, path] = loc;
   const { l, r: rs } = path || {};
   const [r, ...rnext] = rs || [];
-  return path && rs.length
-    ? // TODO: Better way than concat([node])?
-      [r, { ...path, l: l.concat([node]), r: rnext }]
-    : null;
+  if (path && rs.length)
+    return [r, { ...path, l: l.concat([node]), r: rnext }];
+  return null;
 }
 
 function rightmost(loc) {
@@ -93,8 +93,9 @@ function rightmost(loc) {
   if (path && r)
     return [
       r[r.length - 1],
-      { ...path, l: l.concat(node, r.slice(1)), r: null },
+      { ...path, l: l.concat([node], r.slice(0, -1)), r: [] },
     ];
+  return null;
 }
 
 function left(loc) {
@@ -105,20 +106,22 @@ function left(loc) {
       l[l.length - 1],
       { ...path, l: l.slice(0, -1), r: [node].concat(r) },
     ];
+  return null;
 }
 
 function leftmost(loc) {
   const [node, path] = loc;
   const { l, r } = path;
   if (path && l)
-    return [l[0], { ...path, l: null, r: l.slice(0, -1).concat(node, r) }];
+    return [l[0], { ...path, l: [], r: l.slice(1).concat([node], r) }];
+  return null;
 }
 
 function insertLeft(loc, item) {
   const [node, path] = loc;
   const { l } = path || {};
   if (!path) throw new Error("Insert at top");
-  return [node, { ...path, l: l.concat(item), changed: true }];
+  return [node, { ...path, l: l.concat([item]), changed: true }];
 }
 
 function insertRight(loc, item) {
@@ -182,9 +185,9 @@ function remove(loc) {
     : [makeNode(pnodes[0], r), ppath && { ...ppath, changed: true }];
 }
 
-const util = require("util");
-const data = [["a", "*", "b"], "+", ["c", "*", "d"]];
-const dz = arrayZip(data);
+// const util = require("util");
+// const data = [["a", "*", "b"], "+", ["c", "*", "d"]];
+// const dz = arrayZip(data);
 // console.log(util.inspect(right(down(right(right(down(dz))))), {depth: null}));
 // console.log(util.inspect(lefts(right(down(right(right(down(dz)))))), {depth: null}));
 // console.log(util.inspect(rights(right(down(right(right(down(dz)))))), {depth: null}));
