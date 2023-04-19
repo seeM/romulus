@@ -1,14 +1,14 @@
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
+    "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+  font-family: source-code-pro, Menlo, Monaco, Consolas, "Courier New",
     monospace;
 }
 
@@ -20,22 +20,58 @@ textarea {
   display: flex;
 }
 
-.Editor {
+.Text {
   flex: 1;
-}
-
-.Renderer {
-  flex: 1;
+  font-family: monospace;
   white-space: pre-line;
 }
 
-.Block {
+.Cursor {
+  position: absolute;
+  width: 1ch;
+  height: 1.2em;
+  top: 0.1em;
+  z-index: -1;
+  /* TODO: Need to reset animation on motion, else it's bad UX */
+  background-color: lime;
+  /* animation: 1s foo step-end infinite; */
+}
+
+@keyframes foo {
+  from, to { background-color: transparent; }
+  50% { background-color: lime; }
+}
+
+.TextAfter {
+  display: inline;
+  position: relative;
+}
+
+.Structure {
+  flex: 1;
+  white-space: pre-line;
+  background-color: lightgrey;
+}
+
+.node-root {
+  margin: 10px;
+  background-color: grey;
+  color: white;
+}
+
+.node-block {
   margin: 10px;
   background-color: green;
   color: white;
 }
 
-.BlockRef {
+.node-ref {
+  margin: 10px;
+  background-color: cyan;
+  color: black;
+}
+
+.node-text {
   margin: 10px;
   background-color: blue;
   color: white;
